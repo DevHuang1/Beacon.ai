@@ -1,0 +1,10 @@
+{
+  "name": "Beacon.ai",
+  "description": "Beacon.ai - Disaster escape planning and emergency response app with real-time maps, shelter tracking, weather alerts, and evacuation route planning.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
