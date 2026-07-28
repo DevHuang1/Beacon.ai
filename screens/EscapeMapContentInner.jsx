@@ -2,6 +2,7 @@ import React from "react";
 import { Marker, Popup } from "react-leaflet";
 import { Navigation } from "lucide-react";
 import WildfireHotspotOverlay from "../components/WildfireHotspotOverlay";
+import WeatherAlertMapOverlay from "../components/WeatherAlertMapOverlayWrapper";
 
 function createShelterIcon(shelter, isSelected) {
   if (typeof window === "undefined") return null;
@@ -77,6 +78,46 @@ function createShelterIcon(shelter, isSelected) {
   });
 }
 
+function createUserLocationIcon() {
+  if (typeof window === "undefined") return null;
+  const L = require("leaflet");
+
+  const html = `
+    <div style="
+      position: relative;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    ">
+      <div style="
+        position: absolute;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: rgba(37, 99, 235, 0.25);
+        border: 2px solid #2563EB;
+      "></div>
+      <div style="
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #2563EB;
+        border: 2.5px solid #FFFFFF;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      "></div>
+    </div>
+  `;
+
+  return L.divIcon({
+    html,
+    className: "custom-user-gps-pin",
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+}
+
 function openDirections(lat, lon, name) {
   const q = encodeURIComponent(name);
   const ll = `${lat},${lon}`;
@@ -88,9 +129,49 @@ function openDirections(lat, lon, name) {
   window.open(url, "_blank");
 }
 
-export default function EscapeMapContentInner({ shelters = [], hotspots = [], selectedShelter = null, popupRefs = null, onSelect = null }) {
+export default function EscapeMapContentInner({
+  shelters = [],
+  hotspots = [],
+  userLocation = null,
+  selectedShelter = null,
+  popupRefs = null,
+  onSelect = null,
+  showWeatherAlerts = true,
+  showRadar = true,
+  showStormCells = true,
+}) {
+  const centerLat = userLocation?.lat || selectedShelter?.lat || 40.802;
+  const centerLon = userLocation?.lon || selectedShelter?.lon || -124.163;
+
   return (
     <>
+      {/* Live Weather Alerts & NEXRAD Storm Radar Layer */}
+      {showWeatherAlerts && (
+        <WeatherAlertMapOverlay
+          lat={centerLat}
+          lon={centerLon}
+          showRadar={showRadar}
+          showAlertZones={true}
+          showStormCells={showStormCells}
+        />
+      )}
+      {userLocation && userLocation.lat && userLocation.lon && (
+        <Marker
+          position={[userLocation.lat, userLocation.lon]}
+          icon={createUserLocationIcon()}
+        >
+          <Popup>
+            <div style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", padding: 2 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, color: "#2563EB", marginBottom: 2 }}>
+                📍 Your Current GPS Location
+              </div>
+              <div style={{ fontSize: 11, color: "#64748B", fontFamily: "monospace" }}>
+                {userLocation.lat.toFixed(4)}, {userLocation.lon.toFixed(4)}
+              </div>
+            </div>
+          </Popup>
+        </Marker>
+      )}
       {hotspots && hotspots.length > 0 && <WildfireHotspotOverlay hotspots={hotspots} />}
       {shelters && shelters.map((s) => {
         const isSelected = selectedShelter?.id === s.id;

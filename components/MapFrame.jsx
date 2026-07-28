@@ -27,16 +27,26 @@ function LocationLayer({ position, accuracy }) {
   const map = useMap();
   useEffect(() => {
     if (position) {
-      map.setView(position, 15);
+      map.setView(position, map.getZoom());
     }
   }, [position]);
   if (!position) return null;
   return (
     <>
-      <Circle center={position} radius={Math.max(accuracy || 30, 1)} pathOptions={{ color: C.teal, fillColor: C.teal, fillOpacity: 0.15 }} />
-      <Circle center={position} radius={6} pathOptions={{ color: C.teal, fillColor: C.teal }} />
+      <Circle center={position} radius={Math.max(accuracy || 30, 15)} pathOptions={{ color: C.teal, fillColor: C.teal, fillOpacity: 0.15 }} />
+      <Circle center={position} radius={8} pathOptions={{ color: "#FFFFFF", fillColor: C.teal, fillOpacity: 1, weight: 3 }} />
     </>
   );
+}
+
+function MapCenterUpdater({ center, zoom }) {
+  const map = useMap();
+  useEffect(() => {
+    if (center && Array.isArray(center) && center[0] && center[1]) {
+      map.setView(center, zoom || map.getZoom());
+    }
+  }, [center, zoom, map]);
+  return null;
 }
 
 export default function MapFrame({
@@ -129,6 +139,7 @@ export default function MapFrame({
           errorTileUrl="data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Crect width='100%25' height='100%25' fill='%23F8FAFC'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748B' font-size='12'%3ETile error%3C/text%3E%3C/svg%3E"
         />
         <TileErrorWatcher onError={() => setTileFailed(true)} />
+        <MapCenterUpdater center={propCenter} zoom={zoom} />
         {geojson && <GeoJSON data={geojson} style={geoStyle || undefined} />}
         <LocationLayer position={userPos} accuracy={userAcc} />
         {children}

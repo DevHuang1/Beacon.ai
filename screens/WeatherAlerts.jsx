@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { PageHeader, Panel, Toggle } from "../components";
-import { Search, CloudRain, Wind, Droplets, TriangleAlert, Sun, Moon, Cloud } from "lucide-react";
+import MapFrame from "../components/MapFrameWrapper";
+import WeatherAlertMapOverlay from "../components/WeatherAlertMapOverlayWrapper";
+import { Search, CloudRain, Wind, Droplets, TriangleAlert, Sun, Moon, Cloud, ShieldAlert } from "lucide-react";
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
 
@@ -18,8 +20,9 @@ export default function WeatherAlerts() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    api.weather.forecast().then((res) => {
+  const loadForecastForLocation = (lat, lon) => {
+    setLoading(true);
+    api.weather.forecast(lat, lon).then((res) => {
       if (res?.success && res.data) {
         setForecast(res.data.forecast?.slice(0, 7) || []);
         if (res.data.rain_12h) setRain12h(res.data.rain_12h);
@@ -29,6 +32,22 @@ export default function WeatherAlerts() {
         setError(res?.error || "Failed to load weather data");
       }
     }).catch((err) => setError(err.message)).finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    // Initial fetch
+    loadForecastForLocation(40.802, -124.163);
+
+    // Auto GPS location update
+    if (typeof window !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          loadForecastForLocation(pos.coords.latitude, pos.coords.longitude);
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    }
   }, []);
 
   const hasData = current || (forecast && forecast.length > 0);
@@ -150,6 +169,34 @@ export default function WeatherAlerts() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14 }}>
+            <div style={{
+              padding: "12px 16px",
+              background: C.panel2,
+              borderBottom: `1px solid ${C.line}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 13, color: C.text }}>
+                <ShieldAlert size={16} color={C.red} />
+                <span>NEXRAD Storm Tracking Radar & Active Alerts</span>
+              </div>
+              <span style={{ fontSize: 11, fontFamily: fontMono, color: C.teal, background: `${C.teal}18`, padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
+                Live WMS Layer
+              </span>
+            </div>
+            <MapFrame height={280} center={[40.802, -124.163]} zoom={10}>
+              <WeatherAlertMapOverlay
+                lat={40.802}
+                lon={-124.163}
+                showRadar={true}
+                showAlertZones={true}
+                showStormCells={true}
+              />
+            </MapFrame>
+          </Panel>
+
           {currentWeather && (
             <Panel title="Current conditions" style={{ animation: "slideUp 0.3s ease" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

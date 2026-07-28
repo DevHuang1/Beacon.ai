@@ -9,6 +9,7 @@ import {
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
 import firmsService from "../lib/services/firmsService";
+import { validateAndFilterShelters } from "../lib/haversine";
 
 const EscapeMapContent = dynamic(() => import("./EscapeMapContent"), { ssr: false });
 
@@ -69,15 +70,26 @@ export default function EscapeAssistant() {
 
   const scenario = SCENARIOS[activeScenario];
 
-  useEffect(() => {
-    api.shelters.list().then((res) => {
+  const fetchLocationData = useCallback((lat, lon) => {
+    api.shelters.list(lat, lon).then((res) => {
       if (res?.success && res.data?.shelters) {
-        setShelters(res.data.shelters);
-        setSelectedShelter(res.data.shelters[0]);
+        const { verifiedShelters } = validateAndFilterShelters(res.data.shelters, lat, lon, 10);
+        setShelters(verifiedShelters);
+        setSelectedShelter(verifiedShelters[0] || null);
       } else {
         setShelterError(res?.error || "Failed to load shelters");
       }
     }).catch((err) => setShelterError(err.message));
+
+    api.weather.now(lat, lon).then((res) => {
+      if (res?.success && res.data) setWeather(res.data);
+      else setWeatherError(res?.error || "Unavailable");
+    }).catch((err) => setWeatherError(err.message));
+  }, []);
+
+  useEffect(() => {
+    // Initial default fetch
+    fetchLocationData(40.802, -124.163);
 
     firmsService.fetchHotspots().then((res) => {
       if (res?.success) {
@@ -85,19 +97,20 @@ export default function EscapeAssistant() {
       }
     }).catch(() => {});
 
-    api.weather.now().then((res) => {
-      if (res?.success && res.data) setWeather(res.data);
-      else setWeatherError(res?.error || "Unavailable");
-    }).catch((err) => setWeatherError(err.message));
-
+    // Real GPS auto-acquisition
     if (typeof window !== "undefined" && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (p) => setUserLocation([p.coords.latitude, p.coords.longitude]),
+        (p) => {
+          const lat = p.coords.latitude;
+          const lon = p.coords.longitude;
+          setUserLocation([lat, lon]);
+          fetchLocationData(lat, lon);
+        },
         () => {},
-        { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
       );
     }
-  }, []);
+  }, [fetchLocationData]);
 
   const getLocation = useCallback(() => new Promise((resolve, reject) => {
     if (userLocation) return resolve(userLocation);
