@@ -11,6 +11,7 @@ export default function AuthPage() {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -26,9 +27,14 @@ export default function AuthPage() {
       if (error) setError(error.message);
       else router.push("/");
     } else {
-      const { error } = await supabase.auth.signUp({ email, password });
+      const options = {};
+      if (username && username.trim().length >= 2) {
+        const clean = username.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
+        if (clean.length >= 2) options.data = { username: clean, display_name: clean };
+      }
+      const { error } = await supabase.auth.signUp({ email, password, options });
       if (error) setError(error.message);
-      else setError("Check your email for the confirmation link!");
+      else setError("Account created! Check your email for the confirmation link.");
     }
 
     setLoading(false);
@@ -127,6 +133,34 @@ export default function AuthPage() {
                 style={inputStyle}
               />
             </div>
+
+            {mode === "signup" && (
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: C.textDim,
+                    marginBottom: 6,
+                    fontFamily: fontMono,
+                  }}
+                >
+                  USERNAME
+                </label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Choose a unique username"
+                  minLength={2}
+                  style={inputStyle}
+                />
+                <p style={{ fontSize: 11, color: C.textFaint, margin: "4px 0 0" }}>
+                  Your family can find you by this username
+                </p>
+              </div>
+            )}
 
             <div>
               <label

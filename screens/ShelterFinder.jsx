@@ -8,15 +8,17 @@ import EscapeMapContent from "./EscapeMapContent";
 import shelterService from "../lib/services/shelterService";
 import routeService from "../lib/services/routeService";
 import { validateAndFilterShelters } from "../lib/haversine";
+import { useLocation } from "../lib/LocationContext";
 
 export default function ShelterFinder() {
+  const loc = useLocation();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
-  const [maxRadius, setMaxRadius] = useState(10); // Default 10-mile radius perimeter
+  const [maxRadius, setMaxRadius] = useState(10);
   const [selected, setSelected] = useState(null);
   const [shelters, setShelters] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [userGps, setUserGps] = useState(null);
+  const [userGps, setUserGps] = useState({ lat: loc.lat, lon: loc.lon, isRealGPS: loc.isRealGPS });
   const [routeInfo, setRouteInfo] = useState(null);
   const [routeGeojson, setRouteGeojson] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
@@ -29,11 +31,11 @@ export default function ShelterFinder() {
 
   useEffect(() => {
     loadNearestShelters();
-  }, []);
+  }, [loc.lat, loc.lon]);
 
   const loadNearestShelters = async (radius = maxRadius) => {
     setLoading(true);
-    const res = await shelterService.fetchNearestShelters(undefined, undefined, radius);
+    const res = await shelterService.fetchNearestShelters(loc.lat, loc.lon, radius);
     if (res.success) {
       setShelters(res.allShelters && res.allShelters.length > 0 ? res.allShelters : res.shelters);
       setUserGps(res.userCoords);
@@ -49,7 +51,7 @@ export default function ShelterFinder() {
   const handleAiAutoFind = async () => {
     setAiLoading(true);
     setLoading(true);
-    const res = await shelterService.findSheltersWithAI();
+    const res = await shelterService.findSheltersWithAI(loc.lat, loc.lon);
     if (res.success) {
       setShelters(res.shelters);
       setUserGps(res.userCoords);
@@ -249,7 +251,9 @@ export default function ShelterFinder() {
           ))}
           {!loading && filtered.length === 0 && (
             <div style={{ color: C.textFaint, fontSize: 14, padding: 30, textAlign: "center" }}>
-              {shelters.length === 0 ? "Loading shelter data..." : "No shelters match your search query."}
+              {shelters.length === 0
+                ? "No shelters found near your location. OpenStreetMap may not have data for this area."
+                : "No shelters match your search query."}
             </div>
           )}
           {filtered.map((s, i) => (
@@ -357,7 +361,7 @@ export default function ShelterFinder() {
 
           <MapFrame
             height={550}
-            center={selected ? [selected.lat, selected.lon] : [40.802, -124.163]}
+            center={selected ? [selected.lat, selected.lon] : [loc.lat, loc.lon]}
             zoom={13}
             geojson={routeGeojson}
             geoStyle={routeService.getPolylineStyle("#0D9488")}

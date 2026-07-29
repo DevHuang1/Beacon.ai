@@ -10,6 +10,7 @@ import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
 import firmsService from "../lib/services/firmsService";
 import { validateAndFilterShelters } from "../lib/haversine";
+import { useLocation } from "../lib/LocationContext";
 
 const EscapeMapContent = dynamic(() => import("./EscapeMapContent"), { ssr: false });
 
@@ -28,7 +29,6 @@ const SCENARIOS = {
     title: "Heavy Rain & Rapid Flood Risk",
     alertMessage: "Heavy rain begins. Flood expected near your primary route in 30 minutes.",
     recommendation: "Alternative safe route calculated via elevated ridge line. Direct to nearest open shelter.",
-    nearestShelter: "Civic Community Center (1.2 km)",
     hazardNotice: "Main Street Bridge under water risk in 30 mins",
   },
   quake: {
@@ -38,7 +38,6 @@ const SCENARIOS = {
     title: "Seismic Foreshock & Road Debris",
     alertMessage: "Magnitude 5.8 tremor detected 4 km away. Overpass structural inspection in progress.",
     recommendation: "Bypassing elevated overpasses. Routing through open parkway route.",
-    nearestShelter: "High School Athletic Center (2.1 km)",
     hazardNotice: "Avoid 4th Ave Overpass & Brick Wall Corridors",
   },
   fire: {
@@ -48,19 +47,19 @@ const SCENARIOS = {
     title: "Wildfire Smoke & Evacuation Notice",
     alertMessage: "Wind shift pushing dense smoke south toward Highway 101.",
     recommendation: "North evacuation corridor active. Clear air index along Highway 299.",
-    nearestShelter: "North County Armory Shelter (3.5 km)",
     hazardNotice: "Highway 101 South closed due to zero visibility",
   },
 };
 
 export default function EscapeAssistant() {
+  const loc = useLocation();
   const [shelters, setShelters] = useState([]);
   const [hotspots, setHotspots] = useState([]);
   const [selectedShelter, setSelectedShelter] = useState(null);
   const [weather, setWeather] = useState(null);
   const [weatherError, setWeatherError] = useState(null);
   const [shelterError, setShelterError] = useState(null);
-  const [userLocation, setUserLocation] = useState(null);
+  const [userLocation, setUserLocation] = useState([loc.lat, loc.lon]);
   const [routeData, setRouteData] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState(null);
@@ -88,38 +87,16 @@ export default function EscapeAssistant() {
   }, []);
 
   useEffect(() => {
-    // Initial default fetch
-    fetchLocationData(40.802, -124.163);
-
     firmsService.fetchHotspots().then((res) => {
       if (res?.success) {
         setHotspots(res.hotspots || []);
       }
     }).catch(() => {});
+    setUserLocation([loc.lat, loc.lon]);
+    fetchLocationData(loc.lat, loc.lon);
+  }, [loc.lat, loc.lon, fetchLocationData]);
 
-    // Real GPS auto-acquisition
-    if (typeof window !== "undefined" && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (p) => {
-          const lat = p.coords.latitude;
-          const lon = p.coords.longitude;
-          setUserLocation([lat, lon]);
-          fetchLocationData(lat, lon);
-        },
-        () => {},
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
-      );
-    }
-  }, [fetchLocationData]);
-
-  const getLocation = useCallback(() => new Promise((resolve, reject) => {
-    if (userLocation) return resolve(userLocation);
-    navigator.geolocation.getCurrentPosition(
-      (p) => { const pos = [p.coords.latitude, p.coords.longitude]; setUserLocation(pos); resolve(pos); },
-      reject,
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  }), [userLocation]);
+  const getLocation = useCallback(() => Promise.resolve([loc.lat, loc.lon]), [loc.lat, loc.lon]);
 
   const selectShelter = useCallback((s) => {
     setSelectedShelter(s);
@@ -250,7 +227,7 @@ export default function EscapeAssistant() {
               <div style={{ fontSize: 14, color: C.textDim, marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ color: C.teal, fontWeight: 700 }}>✓ {scenario.recommendation}</span>
                 <span style={{ color: C.textFaint }}>&middot;</span>
-                <span style={{ color: C.amber, fontWeight: 600 }}>Nearest shelter: {scenario.nearestShelter}</span>
+                <span style={{ color: C.amber, fontWeight: 600 }}>Nearest shelter: {sorted.length > 0 ? `${sorted[0].name} (${sorted[0].dist})` : "Loading..."}</span>
               </div>
             </div>
           </div>
@@ -342,7 +319,11 @@ export default function EscapeAssistant() {
               {(shelterError && sorted.length === 0) ? (
                 <div style={{ color: C.textFaint, fontSize: 13, textAlign: "center", padding: 20 }}>{shelterError}</div>
               ) : sorted.length === 0 ? (
-                <div style={{ color: C.textFaint, fontSize: 13, textAlign: "center", padding: 20 }}>Loading shelters...</div>
+                <div style={{ color: C.textFaint, fontSize: 13, textAlign: "center", padding: 20 }}>
+                  {userLocation
+                    ? "No shelters found near your location in OpenStreetMap."
+                    : "Acquiring GPS location to find nearby shelters..."}
+                </div>
               ) : sorted.map((s, i) => (
                 <div
                   key={s.id}

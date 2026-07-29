@@ -6,10 +6,12 @@ import {
   Sparkles, CheckCircle2, Navigation, Eye, AlertTriangle, Layers
 } from "lucide-react";
 import { C, S, fontMono, fontDisplay } from "../lib/theme";
+import { useLocation } from "../lib/LocationContext";
 
 export default function SafeRoutePlanner() {
-  const [start, setStart] = useState("Current GPS Location (40.802°N, 124.163°W)");
-  const [dest, setDest] = useState("Eureka High School Emergency Shelter");
+  const loc = useLocation();
+  const [start, setStart] = useState(`Current Location (${loc.coords})`);
+  const [dest, setDest] = useState("Search destination...");
   const [avoidFloods, setAvoidFloods] = useState(true);
   const [avoidLandslides, setAvoidLandslides] = useState(true);
   const [selectedRouteOption, setSelectedRouteOption] = useState("safe");

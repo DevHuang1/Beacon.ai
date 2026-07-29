@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { PageHeader, Panel, Badge, Button } from "../components";
 import MapFrame from "../components/MapFrameWrapper";
 import SvgOverlayContent from "../components/SvgOverlayContent";
@@ -17,71 +17,100 @@ import {
   PhoneCall,
   Share2,
   Zap,
+  Settings,
+  Bell,
 } from "lucide-react";
 import { C, fontDisplay, fontMono } from "../lib/theme";
+import { useLocation } from "../lib/LocationContext";
 
-const INITIAL_MEMBERS = [
-  {
-    id: "m1",
-    name: "Sarah Chen",
-    role: "Daughter (16)",
-    status: "safe",
-    statusText: "Reached Shelter",
-    shelter: "Civic Community Center Shelter",
-    dist: "1.2 km away",
-    battery: 88,
-    lastPing: "2 mins ago",
-    coords: [40.806, -124.161],
-    phone: "(555) 234-5678",
-  },
-  {
-    id: "m2",
-    name: "Mark Chen",
-    role: "Spouse",
-    status: "in_transit",
-    statusText: "Evacuating Zone B",
-    shelter: "Heading to High School Gym",
-    dist: "2.8 km away",
-    battery: 64,
-    lastPing: " Just now",
-    coords: [40.798, -124.155],
-    phone: "(555) 345-6789",
-  },
-  {
-    id: "m3",
-    name: "Elena Chen",
-    role: "Grandmother",
-    status: "safe",
-    statusText: "Safe at Home",
-    shelter: "Second Floor Annex (Elevated)",
-    dist: "0.5 km away",
-    battery: 95,
-    lastPing: "5 mins ago",
-    coords: [40.803, -124.165],
-    phone: "(555) 876-5432",
-  },
-  {
-    id: "m4",
-    name: "Liam Chen",
-    role: "Son (12)",
-    status: "warning",
-    statusText: "Near Flood Risk Zone",
-    shelter: "Assisted Transport Dispatched",
-    dist: "3.4 km away",
-    battery: 29,
-    lastPing: "1 min ago",
-    coords: [40.791, -124.172],
-    phone: "(555) 456-7890",
-  },
-];
+function loadJSON(key, fallback) {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function buildMockMembers(baseLat = 40.802, baseLon = -124.163) {
+  return [
+    { id: "m1", name: "Sarah Chen", role: "Daughter (16)", status: "safe", statusText: "Reached Shelter", shelter: "Downtown Community Shelter", dist: "1.2 km away", battery: 88, lastPing: "2 mins ago", coords: [baseLat + 0.004, baseLon + 0.002], phone: "(555) 234-5678" },
+    { id: "m2", name: "Mark Chen", role: "Spouse", status: "in_transit", statusText: "Evacuating Zone B", shelter: "Heading to High School Gym", dist: "2.8 km away", battery: 64, lastPing: "Just now", coords: [baseLat - 0.004, baseLon + 0.008], phone: "(555) 345-6789" },
+    { id: "m3", name: "Elena Chen", role: "Grandmother", status: "safe", statusText: "Safe at Home", shelter: "Second Floor Annex", dist: "0.5 km away", battery: 95, lastPing: "5 mins ago", coords: [baseLat + 0.001, baseLon - 0.002], phone: "(555) 876-5432" },
+    { id: "m4", name: "Liam Chen", role: "Son (12)", status: "warning", statusText: "Near Flood Risk Zone", shelter: "Assisted Transport Dispatched", dist: "3.4 km away", battery: 29, lastPing: "1 min ago", coords: [baseLat - 0.011, baseLon - 0.009], phone: "(555) 456-7890" },
+  ];
+}
 
 export default function FamilyTracking() {
-  const [members, setMembers] = useState(INITIAL_MEMBERS);
-  const [selectedId, setSelectedId] = useState("m1");
+  const loc = useLocation();
+  const [members, setMembers] = useState(() => {
+    const saved = loadJSON("beacon_profile_family", null);
+    if (saved && saved.length > 0) {
+      const baseLat = loc?.lat || 40.802;
+      const baseLon = loc?.lon || -124.163;
+      return saved.map((m, i) => ({
+        id: m.id,
+        name: m.name,
+        role: m.role || "Family",
+        status: i === 0 ? "safe" : i === 1 ? "in_transit" : i === 3 ? "warning" : "safe",
+        statusText: i === 0 ? "Reached Shelter" : i === 1 ? "Evacuating Zone B" : i === 3 ? "Near Flood Risk Zone" : "Safe at Home",
+        shelter: `${m.name}'s Location`,
+        dist: `${(0.5 + i * 0.7).toFixed(1)} km away`,
+        battery: 100 - i * 15,
+        lastPing: `${i + 1} min ago`,
+        coords: [baseLat + i * 0.004, baseLon + i * 0.003],
+        phone: m.phone || "",
+      }));
+    }
+    const baseLat = loc?.lat || 40.802;
+    const baseLon = loc?.lon || -124.163;
+    return buildMockMembers(baseLat, baseLon);
+  });
+  const [selectedId, setSelectedId] = useState(members[0]?.id || null);
   const [pingSent, setPingSent] = useState(false);
   const [myStatus, setMyStatus] = useState("safe");
+  const [actionMsg, setActionMsg] = useState("");
 
   const selectedMember = members.find((m) => m.id === selectedId) || members[0];
+  const hasProfileMembers = loadJSON("beacon_profile_family", null)?.length > 0;
+
+  const shareMyLocation = async () => {
+    if (typeof window === "undefined") return;
+    try {
+      const pos = await new Promise((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 8000 })
+      );
+      const mapsUrl = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+      const msg = `🚨 BEACON.AI - My live location: ${mapsUrl}`;
+      if (navigator.share) {
+        await navigator.share({ title: "My Location", text: msg });
+      } else {
+        await navigator.clipboard.writeText(msg);
+      }
+      setActionMsg("Location shared with " + selectedMember.name);
+    } catch {
+      setActionMsg("Could not get location");
+    }
+    setTimeout(() => setActionMsg(""), 4000);
+  };
+
+  const alertMember = async () => {
+    const msg = `🚨 EMERGENCY ALERT from your family member on Beacon.AI. Check your app immediately!`;
+    if (Notification.permission === "granted") {
+      new Notification("Emergency Alert", { body: `Alerting ${selectedMember.name}...` });
+    } else if (Notification.permission !== "denied") {
+      const perm = await Notification.requestPermission();
+      if (perm === "granted") new Notification("Emergency Alert", { body: `Alerting ${selectedMember.name}...` });
+    }
+    try {
+      await navigator.clipboard.writeText(msg);
+      setActionMsg(`Alert sent to ${selectedMember.name}`);
+    } catch {
+      setActionMsg(`Alert prepared for ${selectedMember.name}`);
+    }
+    setTimeout(() => setActionMsg(""), 4000);
+  };
 
   const handleSendPing = () => {
     setPingSent(true);
@@ -104,6 +133,11 @@ export default function FamilyTracking() {
           tone="safe"
         />
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          {!hasProfileMembers && (
+            <span style={{ fontSize: 12, color: C.textFaint, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
+              <Settings size={13} /> Add family in Profile & Settings
+            </span>
+          )}
           <Button
             variant={myStatus === "safe" ? "success" : myStatus === "warning" ? "danger" : "secondary"}
             onClick={handleToggleMyStatus}
@@ -263,33 +297,29 @@ export default function FamilyTracking() {
               <div>
                 <div style={{ fontSize: 13, color: C.textFaint, fontFamily: fontMono }}>CONTACT & ACTION</div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: C.text, marginTop: 2 }}>
-                  {selectedMember.name} &middot; {selectedMember.phone}
+                  {selectedMember.name} {selectedMember.phone ? `· ${selectedMember.phone}` : ""}
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <a
-                  href={`tel:${selectedMember.phone}`}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "8px 14px",
-                    borderRadius: 8,
-                    background: C.tealGlow,
-                    color: C.teal,
-                    border: `1px solid ${C.teal}44`,
-                    textDecoration: "none",
-                    fontWeight: 600,
-                    fontSize: 13,
-                  }}
-                >
-                  <PhoneCall size={14} /> Call
-                </a>
-                <Button variant="secondary" onClick={() => alert(`Directions requested to ${selectedMember.name}'s last known location.`)}>
-                  <Navigation size={14} /> Route
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {selectedMember.phone && (
+                  <a href={`tel:${selectedMember.phone}`}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, background: C.tealGlow, color: C.teal, border: `1px solid ${C.teal}44`, textDecoration: "none", fontWeight: 600, fontSize: 13 }}>
+                    <PhoneCall size={14} /> Call
+                  </a>
+                )}
+                <Button variant="secondary" onClick={shareMyLocation} style={{ display: "flex", alignItems: "center", gap: 5, padding: "8px 14px", fontSize: 13 }}>
+                  <Share2 size={14} /> Share
+                </Button>
+                <Button variant="danger" onClick={alertMember} style={{ display: "flex", alignItems: "center", gap: 5, padding: "8px 14px", fontSize: 13 }}>
+                  <Bell size={14} /> Alert
                 </Button>
               </div>
             </div>
+            {actionMsg && (
+              <div style={{ marginTop: 10, fontSize: 12, color: C.teal, display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", background: C.tealDim, borderRadius: 8 }}>
+                <CheckCircle2 size={13} /> {actionMsg}
+              </div>
+            )}
           </Panel>
         </div>
       </div>

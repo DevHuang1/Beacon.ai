@@ -5,10 +5,12 @@ import WeatherAlertMapOverlay from "../components/WeatherAlertMapOverlayWrapper"
 import { Search, CloudRain, Wind, Droplets, TriangleAlert, Sun, Moon, Cloud, ShieldAlert } from "lucide-react";
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
+import { useLocation } from "../lib/LocationContext";
 
 const ICON_MAP = { sunny: Sun, cloudy: Cloud, rain: CloudRain };
 
 export default function WeatherAlerts() {
+  const loc = useLocation();
   const [notifDetail, setNotifDetail] = useState(true);
   const [notifLoc, setNotifLoc] = useState(true);
   const [notifSevere, setNotifSevere] = useState(false);
@@ -35,20 +37,8 @@ export default function WeatherAlerts() {
   };
 
   useEffect(() => {
-    // Initial fetch
-    loadForecastForLocation(40.802, -124.163);
-
-    // Auto GPS location update
-    if (typeof window !== "undefined" && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          loadForecastForLocation(pos.coords.latitude, pos.coords.longitude);
-        },
-        () => {},
-        { enableHighAccuracy: true, timeout: 8000 }
-      );
-    }
-  }, []);
+    loadForecastForLocation(loc.lat, loc.lon);
+  }, [loc.lat, loc.lon]);
 
   const hasData = current || (forecast && forecast.length > 0);
   const days = forecast || [];
@@ -186,10 +176,10 @@ export default function WeatherAlerts() {
                 Live WMS Layer
               </span>
             </div>
-            <MapFrame height={280} center={[40.802, -124.163]} zoom={10}>
+            <MapFrame height={280} center={[loc.lat, loc.lon]} zoom={10}>
               <WeatherAlertMapOverlay
-                lat={40.802}
-                lon={-124.163}
+                lat={loc.lat}
+                lon={loc.lon}
                 showRadar={true}
                 showAlertZones={true}
                 showStormCells={true}

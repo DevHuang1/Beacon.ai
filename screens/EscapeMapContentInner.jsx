@@ -3,13 +3,15 @@ import { Marker, Popup } from "react-leaflet";
 import { Navigation } from "lucide-react";
 import WildfireHotspotOverlay from "../components/WildfireHotspotOverlay";
 import WeatherAlertMapOverlay from "../components/WeatherAlertMapOverlayWrapper";
+import { useLocation } from "../lib/LocationContext";
 
 function createShelterIcon(shelter, isSelected) {
   if (typeof window === "undefined") return null;
   const L = require("leaflet");
 
-  const occupied = shelter.occupied || parseInt(shelter.cap?.split("/")[0]) || 200;
-  const total = shelter.total || parseInt(shelter.cap?.split("/")[1]) || 500;
+  const hasCapacity = shelter.total != null || (shelter.cap && shelter.cap.includes("/"));
+  const occupied = hasCapacity ? (shelter.occupied || parseInt(shelter.cap?.split("/")[0]) || 0) : null;
+  const total = hasCapacity ? (shelter.total || parseInt(shelter.cap?.split("/")[1]) || 0) : null;
   const ratio = total > 0 ? occupied / total : 0.5;
 
   let pinColor = "#0D9488"; // Teal
@@ -140,8 +142,9 @@ export default function EscapeMapContentInner({
   showRadar = true,
   showStormCells = true,
 }) {
-  const centerLat = userLocation?.lat || selectedShelter?.lat || 40.802;
-  const centerLon = userLocation?.lon || selectedShelter?.lon || -124.163;
+  const loc = useLocation();
+  const centerLat = userLocation?.lat || selectedShelter?.lat || loc.lat;
+  const centerLon = userLocation?.lon || selectedShelter?.lon || loc.lon;
 
   return (
     <>
@@ -175,9 +178,10 @@ export default function EscapeMapContentInner({
       {hotspots && hotspots.length > 0 && <WildfireHotspotOverlay hotspots={hotspots} />}
       {shelters && shelters.map((s) => {
         const isSelected = selectedShelter?.id === s.id;
-        const occupied = s.occupied || parseInt(s.cap?.split("/")[0]) || 200;
-        const total = s.total || parseInt(s.cap?.split("/")[1]) || 500;
-        const pct = Math.min(100, Math.round((occupied / total) * 100));
+        const hasCapacity = s.total != null || (s.cap && s.cap.includes("/"));
+        const occupied = hasCapacity ? (s.occupied || parseInt(s.cap?.split("/")[0]) || 0) : null;
+        const total = hasCapacity ? (s.total || parseInt(s.cap?.split("/")[1]) || 0) : null;
+        const pct = total > 0 ? Math.min(100, Math.round((occupied / total) * 100)) : null;
 
         let barColor = "#0D9488";
         if (pct >= 90) barColor = "#DC2626";
@@ -238,15 +242,23 @@ export default function EscapeMapContentInner({
 
                 {/* Capacity Progress Bar */}
                 <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
-                    <span>Occupancy</span>
-                    <span style={{ fontFamily: "monospace", color: barColor }}>
-                      {occupied} / {total} ({pct}%)
-                    </span>
-                  </div>
-                  <div style={{ width: "100%", height: 6, background: "#E2E8F0", borderRadius: 99, overflow: "hidden" }}>
-                    <div style={{ width: `${pct}%`, height: "100%", background: barColor, borderRadius: 99, transition: "width 0.3s ease" }} />
-                  </div>
+                  {pct !== null ? (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                        <span>Occupancy</span>
+                        <span style={{ fontFamily: "monospace", color: barColor }}>
+                          {occupied} / {total} ({pct}%)
+                        </span>
+                      </div>
+                      <div style={{ width: "100%", height: 6, background: "#E2E8F0", borderRadius: 99, overflow: "hidden" }}>
+                        <div style={{ width: `${pct}%`, height: "100%", background: barColor, borderRadius: 99, transition: "width 0.3s ease" }} />
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#64748B", textAlign: "center" }}>
+                      Capacity data unavailable
+                    </div>
+                  )}
                 </div>
 
                 {/* Facilities Tags */}

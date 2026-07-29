@@ -72,7 +72,14 @@ export default function ShelterCard({ shelter, selected = false, onSelect, onDir
           </div>
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, flexWrap: "wrap", gap: 8 }}>
-            <span style={{ fontSize: 13, color: C.textDim, fontWeight: 600 }}>Capacity {shelter.cap}</span>
+            <span style={{ fontSize: 13, color: C.textDim, fontWeight: 600 }}>
+              {shelter.total != null ? `Capacity ${shelter.cap}` : "Capacity unknown"}
+            </span>
+            {shelter.isRealOSM && (
+              <span style={{ fontSize: 10, color: "#2563EB", background: "#EFF6FF", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>
+                OSM
+              </span>
+            )}
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {(shelter.facilities || []).map((f) => (
                 <span key={f} style={{

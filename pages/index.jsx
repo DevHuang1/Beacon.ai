@@ -15,6 +15,7 @@ export default function Home() {
     route: screens.route,
     shelters: screens.shelters,
     family: screens.family,
+    profile: screens.profile,
     flood: screens.flood,
     wildfire: screens.wildfire,
     earthquake: screens.earthquake,

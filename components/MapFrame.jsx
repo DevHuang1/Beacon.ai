@@ -42,7 +42,7 @@ function LocationLayer({ position, accuracy }) {
 function MapCenterUpdater({ center, zoom }) {
   const map = useMap();
   useEffect(() => {
-    if (center && Array.isArray(center) && center[0] && center[1]) {
+    if (center && Array.isArray(center) && center.length >= 2 && typeof center[0] === "number" && typeof center[1] === "number") {
       map.setView(center, zoom || map.getZoom());
     }
   }, [center, zoom, map]);

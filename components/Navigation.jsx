@@ -5,10 +5,11 @@ import theme, { fontMono } from "../lib/theme";
 import { Badge } from "./ui2";
 import Button from "./Button";
 import { useAuth } from "./AuthProvider";
+import { useLocation } from "../lib/LocationContext";
 import { createClient } from "../lib/supabase-client";
 import {
   AlertTriangle, MapPin, Shield, Activity, Flame, CloudRain, Navigation,
-  Home, ChevronRight, TriangleAlert, Radio, Waves, Compass, Bell, X, HelpCircle, Users, LogOut, User,
+  Home, ChevronRight, TriangleAlert, Radio, Waves, Compass, Bell, X, HelpCircle, Users, LogOut, User, Settings,
 } from "lucide-react";
 
 const C = theme.C;
@@ -20,6 +21,7 @@ export function StatusRibbon({ activeModule }) {
     route: { tone: "info", text: "Safe Route Planner — AI hazard avoidance routing bypassing flooded roads and landslides", icon: Navigation },
     shelters: { tone: "safe", text: "Shelter Finder — Real-time shelter availability, capacity meters, and ADA/pet facilities", icon: Home },
     family: { tone: "safe", text: "Family Locator — Track family member check-ins, shelter arrivals, and battery status", icon: Users },
+    profile: { tone: "info", text: "Profile & Settings — Configure your default location, family members, and app preferences", icon: Settings },
     flood: { tone: "warning", text: "Smart Flood Monitoring — USGS river gauge sensors and satellite water boundary analysis", icon: Waves },
     wildfire: { tone: "critical", text: "Wildfire Risk Tracker — NASA satellite thermal hotspots and wind direction vectors", icon: Flame },
     earthquake: { tone: "info", text: "Earthquake Monitor — USGS seismic activity feed and epicenter proximity alerts", icon: Activity },
@@ -57,10 +59,11 @@ export function StatusRibbon({ activeModule }) {
 }
 
 export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
-  const [menuOpen, setMenuOpen] = useState(false);
   const initials = user?.email?.charAt(0).toUpperCase() || "?";
+  const loc = useLocation();
 
   const handleLogout = async () => {
     const supabase = createClient();
@@ -115,8 +118,9 @@ export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp })
           </Button>
         )}
         <div className="mono meta" aria-hidden style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: C.panel2, borderRadius: 8, border: `1px solid ${C.line}` }}>
-          <Compass size={14} color={C.teal} />
-          <span style={{ color: C.text, fontWeight: 600 }}>40.802°N, 124.163°W</span>
+          <Compass size={14} color={loc.gpsStatus === "live" ? C.teal : C.textFaint} />
+          <span style={{ color: C.text, fontWeight: 600 }}>{loc.coords}</span>
+          {loc.gpsStatus === "live" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.teal }} />}
         </div>
         <Button variant="danger" ariaLabel="Open alerts" onClick={onOpenAlert} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", fontWeight: 700 }}>
           <Bell size={15} strokeWidth={2.4} aria-hidden />
@@ -158,6 +162,17 @@ export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp })
               <div style={{ padding: "8px 12px", fontSize: 13, color: C.textDim, borderBottom: `1px solid ${C.lineSoft}`, marginBottom: 4 }}>
                 {user?.email}
               </div>
+              <button
+                onClick={() => { setMenuOpen(false); if (onNavigate) onNavigate("profile"); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, width: "100%",
+                  padding: "8px 12px", borderRadius: 8, border: "none",
+                  background: "none", color: C.text, fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                <Settings size={14} /> Profile & Settings
+              </button>
               <button
                 onClick={handleLogout}
                 style={{
@@ -301,6 +316,37 @@ export function SideNav({ active, onNavigate, collapsed }) {
       })}
 
       <div style={{ flex: 1 }} />
+
+      {/* Profile & Settings */}
+      <Button
+        onClick={() => onNavigate("profile")}
+        ariaLabel="Profile and settings"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          background: active === "profile" ? C.blueDim : "transparent",
+          border: `1px solid ${active === "profile" ? C.blue : "transparent"}`,
+          color: active === "profile" ? C.blue : C.textDim,
+          borderRadius: 10,
+          padding: collapsed ? "10px 8px" : "10px 12px",
+          textAlign: "left",
+          justifyContent: collapsed ? "center" : "flex-start",
+          fontSize: 14,
+          fontWeight: active === "profile" ? 800 : 600,
+          minHeight: 44,
+          transition: "all 0.15s ease",
+        }}
+      >
+        <div style={{
+          width: 28, height: 28, borderRadius: 8,
+          background: active === "profile" ? `${C.blue}22` : C.panel2,
+          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+        }}>
+          <Settings size={16} strokeWidth={2.2} color={active === "profile" ? C.blue : C.textFaint} aria-hidden />
+        </div>
+        {!collapsed && <span style={{ whiteSpace: "nowrap" }}>Settings</span>}
+      </Button>
 
       {!collapsed && (
         <div style={{

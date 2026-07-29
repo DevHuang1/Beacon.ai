@@ -2,6 +2,7 @@ import React from "react";
 import { useRouter } from "next/router";
 import { GlobalStyle } from "../components";
 import { AuthProvider, useAuth } from "../components/AuthProvider";
+import { LocationProvider } from "../lib/LocationContext";
 
 function AuthGuard({ children }) {
   const { user, loading } = useAuth();
@@ -37,9 +38,11 @@ export default function App({ Component, pageProps }) {
   return (
     <AuthProvider>
       <GlobalStyle />
-      <AuthGuard>
-        <Component {...pageProps} />
-      </AuthGuard>
+      <LocationProvider>
+        <AuthGuard>
+          <Component {...pageProps} />
+        </AuthGuard>
+      </LocationProvider>
     </AuthProvider>
   );
 }
