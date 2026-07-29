@@ -1,11 +1,14 @@
-import React from "react";
+import React, { useState } from "react";
+import { useRouter } from "next/router";
 import { MODULES } from "../data/mockData";
 import theme, { fontMono } from "../lib/theme";
 import { Badge } from "./ui2";
 import Button from "./Button";
+import { useAuth } from "./AuthProvider";
+import { createClient } from "../lib/supabase-client";
 import {
   AlertTriangle, MapPin, Shield, Activity, Flame, CloudRain, Navigation,
-  Home, ChevronRight, TriangleAlert, Radio, Waves, Compass, Bell, X, HelpCircle, Users,
+  Home, ChevronRight, TriangleAlert, Radio, Waves, Compass, Bell, X, HelpCircle, Users, LogOut, User,
 } from "lucide-react";
 
 const C = theme.C;
@@ -54,6 +57,17 @@ export function StatusRibbon({ activeModule }) {
 }
 
 export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp }) {
+  const { user } = useAuth();
+  const router = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const initials = user?.email?.charAt(0).toUpperCase() || "?";
+
+  const handleLogout = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/auth");
+  };
+
   return (
     <div style={{
       height: 62,
@@ -118,6 +132,46 @@ export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp })
             marginLeft: 2,
           }}>2</span>
         </Button>
+
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
+            aria-label="User menu"
+            style={{
+              width: 36, height: 36, borderRadius: 10, border: `1px solid ${C.line}`,
+              background: C.blue, color: "#fff", fontWeight: 800, fontSize: 14,
+              fontFamily: fontMono, cursor: "pointer", display: "flex",
+              alignItems: "center", justifyContent: "center",
+            }}
+          >
+            {initials}
+          </button>
+          {menuOpen && (
+            <div
+              style={{
+                position: "absolute", right: 0, top: "100%", marginTop: 8,
+                background: C.panel, border: `1px solid ${C.line}`,
+                borderRadius: 12, boxShadow: theme.S.lg, padding: 8,
+                minWidth: 180, zIndex: 1000,
+              }}
+            >
+              <div style={{ padding: "8px 12px", fontSize: 13, color: C.textDim, borderBottom: `1px solid ${C.lineSoft}`, marginBottom: 4 }}>
+                {user?.email}
+              </div>
+              <button
+                onClick={handleLogout}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, width: "100%",
+                  padding: "8px 12px", borderRadius: 8, border: "none",
+                  background: "none", color: C.red, fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                <LogOut size={14} /> Sign Out
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
