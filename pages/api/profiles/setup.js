@@ -1,5 +1,4 @@
 import { createClient } from "../../../lib/supabase-api";
-import { createAdminClient } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ success: false, error: "Method not allowed" });
@@ -24,18 +23,21 @@ export default async function handler(req, res) {
     });
     if (error) return res.status(400).json({ success: false, error: error.message });
 
-    try {
-      const admin = createAdminClient();
-      if (admin) {
-        await admin.from("profiles").upsert({
-          id: user.id,
-          username: clean,
-          display_name: display_name?.trim() || clean,
-          email: user.email,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: "id" });
-      }
-    } catch {}
+    const { error: dbError } = await supabase.from("profiles").upsert({
+      id: user.id,
+      username: clean,
+      display_name: display_name?.trim() || clean,
+      email: user.email,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "id" });
+
+    if (dbError && dbError.code === "42P01") {
+      return res.status(200).json({
+        success: true,
+        data: { username: clean, display_name: display_name?.trim() || clean },
+        note: "Username saved. To see data in the profiles table, run scripts/setup-profiles.sql in Supabase SQL Editor.",
+      });
+    }
 
     return res.status(200).json({ success: true, data: { username: clean, display_name: display_name?.trim() || clean } });
   } catch (err) {

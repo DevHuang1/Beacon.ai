@@ -64,9 +64,6 @@ export default function Profile() {
   const [displayNameEdit, setDisplayNameEdit] = useState("");
   const [usernameSaving, setUsernameSaving] = useState(false);
   const [usernameMsg, setUsernameMsg] = useState("");
-  const [dbInitMsg, setDbInitMsg] = useState("");
-  const [dbInitBusy, setDbInitBusy] = useState(false);
-  const [dbInitResult, setDbInitResult] = useState(null);
 
   useEffect(() => {
     fetch("/api/auth/session")
@@ -127,22 +124,6 @@ export default function Profile() {
     setSearchingUser(false);
   }, []);
 
-  const handleInitDb = async () => {
-    setDbInitBusy(true);
-    setDbInitResult(null);
-    setDbInitMsg("Setting up database tables...");
-    try {
-      const res = await fetch("/api/profiles/init", { method: "POST" });
-      const data = await res.json();
-      setDbInitResult(data);
-      setDbInitMsg(data.success ? "Database ready!" : data.note || "See output below");
-    } catch (err) {
-      setDbInitResult({ success: false, error: err.message });
-      setDbInitMsg("Setup failed");
-    }
-    setDbInitBusy(false);
-  };
-
   const selectUserResult = (u) => {
     setForm({
       name: u.display_name || u.username || u.email?.split("@")[0] || "",
@@ -200,7 +181,7 @@ export default function Profile() {
       });
       const data = await res.json();
       if (data.success) {
-        setUsernameMsg("Username saved!");
+        setUsernameMsg(data.note ? `${data.note}` : "Username saved!");
         setUserMeta((m) => ({ ...m, username: data.data.username, display_name: data.data.display_name }));
       } else {
         setUsernameMsg(data.error || "Failed to save username");
@@ -416,37 +397,6 @@ export default function Profile() {
 
           {shareMsg && <div style={{ marginTop: 10, fontSize: 12, color: C.teal, display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", background: C.tealDim, borderRadius: 8 }}><CheckCircle2 size={13} /> {shareMsg}</div>}
           {alertMsg && <div style={{ marginTop: 10, fontSize: 12, color: C.red, display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", background: C.redDim, borderRadius: 8 }}><Bell size={13} /> {alertMsg}</div>}
-        </Panel>
-
-        {/* Database */}
-        <Panel title="Database">
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 13, color: C.textDim }}>
-              Your username is stored in your Supabase account. For full database support (profiles table, family relationships, shared locations), run the setup below.
-            </div>
-            <Button variant="primary" onClick={handleInitDb} disabled={dbInitBusy}
-              style={{ padding: "10px 18px", display: "flex", alignItems: "center", gap: 6, fontSize: 13, alignSelf: "flex-start" }}>
-              <Save size={14} /> {dbInitBusy ? "Setting up..." : "Initialize Database Tables"}
-            </Button>
-            {dbInitMsg && (
-              <div style={{
-                fontSize: 12, padding: "10px 14px", borderRadius: 8,
-                background: dbInitResult?.success ? C.tealDim : C.redDim,
-                color: dbInitResult?.success ? C.teal : C.red,
-                border: `1px solid ${dbInitResult?.success ? C.teal + "44" : C.red + "44"}`,
-              }}>
-                {dbInitMsg}
-                {dbInitResult?.sqlScript && (
-                  <div style={{ marginTop: 8, fontSize: 11, color: C.textFaint }}>
-                    To set up manually, run <code style={{ background: C.panel, padding: "2px 6px", borderRadius: 4 }}>{dbInitResult.sqlScript}</code> in Supabase SQL Editor.
-                  </div>
-                )}
-                {dbInitResult?.error && (
-                  <div style={{ marginTop: 8, fontSize: 11, color: C.textFaint }}>{dbInitResult.error}</div>
-                )}
-              </div>
-            )}
-          </div>
         </Panel>
 
         {/* Preferences */}
