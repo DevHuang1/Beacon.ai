@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { MapContainer, TileLayer, GeoJSON, useMapEvent, useMap, Circle } from "react-leaflet";
 import Button from "./Button";
 import { C, S, fontMono } from "../lib/theme";
+import { useLocation } from "../lib/LocationContext";
 
 let leafletIconsFixed = false;
 function fixLeafletIcons() {
@@ -54,12 +55,13 @@ export default function MapFrame({
   center: propCenter,
   zoom = 13, geojson = null, geoStyle = null, overlay = null,
 }) {
+  const loc = useLocation();
   const [tileFailed, setTileFailed] = useState(false);
   const [mapKey, setMapKey] = useState(0);
-  const [mapCenter, setMapCenter] = useState(propCenter || [40.8, -124.16]);
+  const [mapCenter, setMapCenter] = useState(propCenter || [loc.lat, loc.lon]);
 
-  const [userPos, setUserPos] = useState(null);
-  const [userAcc, setUserAcc] = useState(null);
+  const [userPos, setUserPos] = useState(propCenter ? [loc.lat, loc.lon] : null);
+  const [userAcc, setUserAcc] = useState(loc.accuracy || null);
   const [watching, setWatching] = useState(false);
   const [watchId, setWatchId] = useState(null);
   const [locating, setLocating] = useState(false);
@@ -85,6 +87,13 @@ export default function MapFrame({
   }, []);
 
   useEffect(() => {
+    if (propCenter && loc.lat && loc.lon) {
+      setUserPos([loc.lat, loc.lon]);
+      setUserAcc(loc.accuracy || 50);
+    }
+  }, [loc.lat, loc.lon, propCenter]);
+
+  useEffect(() => {
     return () => {
       if (watchId != null && navigator.geolocation && navigator.geolocation.clearWatch) {
         navigator.geolocation.clearWatch(watchId);
@@ -93,6 +102,12 @@ export default function MapFrame({
   }, [watchId]);
 
   const locateOnce = () => {
+    if (propCenter && loc.lat && loc.lon) {
+      setMapCenter([loc.lat, loc.lon]);
+      setUserPos([loc.lat, loc.lon]);
+      setUserAcc(loc.accuracy || 50);
+      return;
+    }
     if (!navigator.geolocation) { alert("Geolocation not supported"); return; }
     setLocating(true);
     navigator.geolocation.getCurrentPosition(

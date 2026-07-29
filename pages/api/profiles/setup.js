@@ -27,7 +27,6 @@ export default async function handler(req, res) {
       id: user.id,
       username: clean,
       display_name: display_name?.trim() || clean,
-      email: user.email,
       updated_at: new Date().toISOString(),
     }, { onConflict: "id" });
 
