@@ -114,7 +114,7 @@ async function fetchRealOsmShelters(userLat, userLon) {
       .filter((el) => el.tags && (el.tags.name || el.tags["name:en"]))
       .slice(0, 8)
       .map((el, idx) => {
-        const rawName = el.tags["name:en"] || el.tags.name;
+        const rawName = el.tags["name:en"] || el.tags.int_name || el.tags.name;
         const lat = el.lat || el.center?.lat;
         const lon = el.lon || el.center?.lon;
         const distMiles = haversineMiles(userLat, userLon, lat, lon);
@@ -154,7 +154,7 @@ async function fetchRealOsmShelters(userLat, userLon) {
 
 async function getReverseGeocodedCity(lat, lon) {
   try {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=12`;
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=12&accept-language=en`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2500);
     const res = await fetch(url, {
