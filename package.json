@@ -13,6 +13,7 @@
     "@google/genai": "^2.13.0",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.111.0",
+    "groq-sdk": "^0.5.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.27.0",
     "next": "^16.2.12",

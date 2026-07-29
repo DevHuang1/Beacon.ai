@@ -49,7 +49,7 @@ export default function ShelterFinder() {
   const handleAiAutoFind = async () => {
     setAiLoading(true);
     setLoading(true);
-    const res = await shelterService.findSheltersWithGemini();
+    const res = await shelterService.findSheltersWithAI();
     if (res.success) {
       setShelters(res.shelters);
       setUserGps(res.userCoords);
@@ -182,11 +182,11 @@ export default function ShelterFinder() {
           onClick={handleAiAutoFind}
           disabled={aiLoading}
           style={{ padding: "0 18px", display: "flex", alignItems: "center", gap: 8, height: 46, background: "linear-gradient(135deg, #2563EB, #7C3AED)" }}
-          ariaLabel="Auto find optimal shelter using Gemini AI and current GPS location"
+          ariaLabel="Auto find optimal shelter using AI and current GPS location"
         >
           <Sparkles size={16} color="#FFFFFF" />
           <span style={{ fontSize: 13, fontWeight: 800 }}>
-            {aiLoading ? "Gemini AI Analyzing..." : "Gemini Auto-Find"}
+            {aiLoading ? "AI Analyzing..." : "AI Auto-Find"}
           </span>
         </Button>
       </div>
@@ -231,10 +231,10 @@ export default function ShelterFinder() {
         <Panel style={{ marginBottom: 18, border: `1px solid #93C5FD`, background: "#EFF6FF", padding: "14px 18px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, color: "#1E40AF", fontWeight: 800, fontSize: 15 }}>
             <Sparkles size={18} color="#2563EB" />
-            <span>Gemini AI Shelter Assessment & Guidance</span>
+            <span>AI Shelter Assessment & Guidance</span>
           </div>
           <div style={{ fontSize: 13, color: "#1E3A8A", lineHeight: 1.5, whiteSpace: "pre-line" }}>
-            {aiAnalysis.text || aiAnalysis.advisory || "Gemini AI has analyzed nearby emergency shelter capacities and routed you to the optimal location."}
+            {aiAnalysis.text || aiAnalysis.advisory || "AI has analyzed nearby emergency shelter capacities and routed you to the optimal location."}
           </div>
         </Panel>
       )}
