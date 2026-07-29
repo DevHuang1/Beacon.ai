@@ -7,7 +7,7 @@ export default async function handler(req, res) {
     // Use the national water dashboard API for broader coverage
     const usgsUrl =
       "https://waterservices.usgs.gov/nwis/iv/?format=json&sites=11476580,11477000&parameterCd=00065,00060";
-    const resp = await fetchWithTimeout(usgsUrl, {}, 5000);
+    const resp = await fetchWithTimeout(usgsUrl, {}, 15000);
     if (!resp.ok) throw new Error(`USGS returned ${resp.status}`);
 
     const json = await resp.json();

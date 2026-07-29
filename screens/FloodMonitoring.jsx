@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { PageHeader, Panel, Badge, Button } from "../components";
 import MapFrame from "../components/MapFrameWrapper";
+import SvgOverlayContent from "../components/SvgOverlayContent";
 import { Waves, Droplets, Gauge, TrendingUp, Satellite, ToggleLeft, ToggleRight } from "lucide-react";
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
@@ -165,20 +166,22 @@ export default function FloodMonitoring() {
 
       <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14 }}>
         <MapFrame height={440} geojson={floodGeo} geoStyle={floodStyle}>
-          <text x="14" y="24" fontFamily={fontMono} fontSize="10" fill={C.textFaint}>
-            {satMode ? "Satellite flood extent overlay · OpenGeoAI" : `${gaugeList.length} active gauges · USGS NWIS`}
-          </text>
-          {gaugeList.map((s, i) => {
-            const cx = 60 + (i * 110) % 340;
-            const cy = 80 + (i * 80) % 200;
-            const color = s.risk === "high" ? C.red : s.risk === "moderate" ? C.amber : C.teal;
-            return (
-              <g key={s.name}>
-                <circle cx={cx} cy={cy} r="8" fill={color} stroke={C.bg} strokeWidth="2" />
-                <text x={cx + 13} y={cy + 4} fontFamily={fontMono} fontSize="9" fill={C.textFaint}>{s.name}</text>
-              </g>
-            );
-          })}
+          <SvgOverlayContent>
+            <text x="14" y="24" fontFamily={fontMono} fontSize="10" fill={C.textFaint}>
+              {satMode ? "Satellite flood extent overlay · OpenGeoAI" : `${gaugeList.length} active gauges · USGS NWIS`}
+            </text>
+            {gaugeList.map((s, i) => {
+              const cx = 60 + (i * 110) % 340;
+              const cy = 80 + (i * 80) % 200;
+              const color = s.risk === "high" ? C.red : s.risk === "moderate" ? C.amber : C.teal;
+              return (
+                <g key={s.name}>
+                  <circle cx={cx} cy={cy} r="8" fill={color} stroke={C.bg} strokeWidth="2" />
+                  <text x={cx + 13} y={cy + 4} fontFamily={fontMono} fontSize="9" fill={C.textFaint}>{s.name}</text>
+                </g>
+              );
+            })}
+          </SvgOverlayContent>
         </MapFrame>
       </Panel>
     </div>

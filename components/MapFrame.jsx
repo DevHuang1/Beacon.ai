@@ -134,9 +134,8 @@ export default function MapFrame({
     <div style={{ position: "relative", width: "100%", height, borderRadius: 14, overflow: "hidden" }}>
       <MapContainer key={mapKey} center={mapCenter} zoom={zoom} style={{ width: "100%", height: "100%", borderRadius: 14 }}>
         <TileLayer
-          attribution='&copy; <a href="https://carto.com/attributions">Carto</a>, &copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors'
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          errorTileUrl="data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Crect width='100%25' height='100%25' fill='%23F8FAFC'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748B' font-size='12'%3ETile error%3C/text%3E%3C/svg%3E"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <TileErrorWatcher onError={() => setTileFailed(true)} />
         <MapCenterUpdater center={propCenter} zoom={zoom} />

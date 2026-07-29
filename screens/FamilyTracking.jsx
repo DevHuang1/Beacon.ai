@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { PageHeader, Panel, Badge, Button } from "../components";
 import MapFrame from "../components/MapFrameWrapper";
+import SvgOverlayContent from "../components/SvgOverlayContent";
 import {
   Users,
   ShieldCheck,
@@ -230,29 +231,30 @@ export default function FamilyTracking() {
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <Panel title={`Live Tracking Map — ${selectedMember.name}`}>
             <MapFrame height={320}>
-              {/* Custom SVG Map Overlay representation */}
-              <rect x="0" y="0" width="100%" height="100%" fill="#E2E8F0" />
-              <circle cx="200" cy="160" r="110" fill={C.tealGlow} stroke={C.teal} strokeDasharray="4 4" strokeWidth="1.5" />
-              <text x="200" y="42" fontFamily={fontMono} fontSize="11" fill={C.teal} fontWeight="800" textAnchor="middle">
-                SAFE PERIMETER (1.5 km)
-              </text>
+              <SvgOverlayContent>
+                <rect x="0" y="0" width="100%" height="100%" fill="#E2E8F0" />
+                <circle cx="200" cy="160" r="110" fill={C.tealGlow} stroke={C.teal} strokeDasharray="4 4" strokeWidth="1.5" />
+                <text x="200" y="42" fontFamily={fontMono} fontSize="11" fill={C.teal} fontWeight="800" textAnchor="middle">
+                  SAFE PERIMETER (1.5 km)
+                </text>
 
-              {members.map((m, i) => {
-                const cx = 100 + i * 80;
-                const cy = 120 + (i % 2) * 80;
-                const color = m.status === "safe" ? C.teal : m.status === "in_transit" ? C.blue : C.red;
-                const isSelected = m.id === selectedId;
+                {members.map((m, i) => {
+                  const cx = 100 + i * 80;
+                  const cy = 120 + (i % 2) * 80;
+                  const color = m.status === "safe" ? C.teal : m.status === "in_transit" ? C.blue : C.red;
+                  const isSelected = m.id === selectedId;
 
-                return (
-                  <g key={m.id} onClick={() => setSelectedId(m.id)} style={{ cursor: "pointer" }}>
-                    {isSelected && <circle cx={cx} cy={cy} r="18" fill={`${color}33`} className="animate-pulse" />}
-                    <circle cx={cx} cy={cy} r="10" fill={color} stroke={C.bg} strokeWidth="3" />
-                    <text x={cx} y={cy + 24} fontFamily={fontDisplay} fontSize="12" fill={C.text} fontWeight="700" textAnchor="middle">
-                      {m.name.split(" ")[0]}
-                    </text>
-                  </g>
-                );
-              })}
+                  return (
+                    <g key={m.id} onClick={() => setSelectedId(m.id)} style={{ cursor: "pointer" }}>
+                      {isSelected && <circle cx={cx} cy={cy} r="18" fill={`${color}33`} className="animate-pulse" />}
+                      <circle cx={cx} cy={cy} r="10" fill={color} stroke={C.bg} strokeWidth="3" />
+                      <text x={cx} y={cy + 24} fontFamily={fontDisplay} fontSize="12" fill={C.text} fontWeight="700" textAnchor="middle">
+                        {m.name.split(" ")[0]}
+                      </text>
+                    </g>
+                  );
+                })}
+              </SvgOverlayContent>
             </MapFrame>
           </Panel>
 
