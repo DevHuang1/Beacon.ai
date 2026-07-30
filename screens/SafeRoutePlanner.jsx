@@ -1,229 +1,854 @@
-import React, { useState } from "react";
-import { PageHeader, Panel, Button, Badge } from "../components";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
 import MapFrame from "../components/MapFrameWrapper";
+import { Button } from "../components";
+import { C, S, fontMono, fontBody } from "../lib/theme";
 import {
-  Search, LocateFixed, MapPin, Route, ArrowRight, ShieldCheck, AlertOctagon,
-  Sparkles, CheckCircle2, Navigation, Eye, AlertTriangle, Layers
+  Navigation, ShieldCheck, Flame, Waves, MapPin, Home, AlertTriangle,
+  Crosshair, Target, CloudSun, Gauge, Clock, Route, ShieldAlert,
+  Sparkles, ChevronRight, Zap,
 } from "lucide-react";
-import { C, S, fontMono, fontDisplay } from "../lib/theme";
-import { useLocation } from "../lib/LocationContext";
+import shelterService from "../lib/services/shelterService";
+import routeService from "../lib/services/routeService";
+import { api } from "../lib/api";
+import { calculateHaversineMiles } from "../lib/haversine";
+
+const EscapeMapOverlay = dynamic(() => import("../components/EscapeMapOverlay"), { ssr: false });
+
+const H = { display: "flex", alignItems: "center", gap: 8 };
+const V = { display: "flex", flexDirection: "column", gap: 4 };
+const DANGER_RADIUS_MILES = 0.125;
+
+const SEVERITY_LEVELS = ["Low", "Medium", "High"];
+const SEVERITY_COLORS = { Low: "#10B981", Medium: "#D97706", High: "#DC2626" };
+const DISASTER_TYPES = [
+  { id: "fire", label: "Fire", emoji: "🔥", color: C.red },
+  { id: "flood", label: "Flood", emoji: "🌊", color: "#2563EB" },
+  { id: "earthquake", label: "Earthquake", emoji: "🌍", color: "#D97706" },
+];
+
+const AI_MESSAGES = [
+  "Analyzing satellite imagery...",
+  "Detecting affected roads...",
+  "Evaluating disaster perimeters...",
+  "Finding nearest safe shelter...",
+  "Optimizing evacuation route...",
+  "Route successfully generated.",
+];
+
+function isShelterInDanger(shelter, circles) {
+  if (!circles || circles.length === 0) return false;
+  for (const d of circles) {
+    const dist = calculateHaversineMiles(shelter.lat, shelter.lon, d.lat, d.lon);
+    if (dist < (d.radiusMiles || DANGER_RADIUS_MILES)) return true;
+  }
+  return false;
+}
+
+function getSafetyScore(shelter, dangerCircles) {
+  if (!dangerCircles || dangerCircles.length === 0) return 100;
+  let minDist = Infinity;
+  for (const d of dangerCircles) {
+    const dist = calculateHaversineMiles(shelter.lat, shelter.lon, d.lat, d.lon);
+    minDist = Math.min(minDist, dist);
+  }
+  const threatRadius = DANGER_RADIUS_MILES;
+  if (minDist < threatRadius) return 0;
+  if (minDist < threatRadius * 3) return Math.round(((minDist - threatRadius) / (threatRadius * 2)) * 60);
+  return Math.min(100, Math.round(60 + ((minDist - threatRadius * 3) / 10) * 40));
+}
+
+function generateCoordsNearby(lat, lon, minMeters = 500, maxMeters = 1000) {
+  const distMeters = minMeters + Math.random() * (maxMeters - minMeters);
+  const bearing = Math.random() * 360;
+  const R = 6371000;
+  const d = distMeters / R;
+  const brng = (bearing * Math.PI) / 180;
+  const lat1 = (lat * Math.PI) / 180;
+  const lon1 = (lon * Math.PI) / 180;
+  const newLat = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brng));
+  const newLon = lon1 + Math.atan2(Math.sin(brng) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(newLat));
+  return { lat: newLat * (180 / Math.PI), lon: newLon * (180 / Math.PI) };
+}
+
+function generateDemoWeather() {
+  const conditions = ["Sunny", "Partly Cloudy", "Cloudy", "Light Rain", "Clear"];
+  const c = conditions[Math.floor(Math.random() * conditions.length)];
+  return {
+    temp: Math.round(60 + Math.random() * 30),
+    condition: c,
+    humidity: Math.round(40 + Math.random() * 40),
+    windSpeed: Math.round(5 + Math.random() * 25),
+    windDir: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.floor(Math.random() * 8)],
+  };
+}
 
 export default function SafeRoutePlanner() {
-  const loc = useLocation();
-  const [start, setStart] = useState(`Current Location (${loc.coords})`);
-  const [dest, setDest] = useState("Search destination...");
-  const [avoidFloods, setAvoidFloods] = useState(true);
-  const [avoidLandslides, setAvoidLandslides] = useState(true);
-  const [selectedRouteOption, setSelectedRouteOption] = useState("safe");
-  const [searched, setSearched] = useState(true);
+  const [userCoords, setUserCoords] = useState(null);
+  const [shelters, setShelters] = useState([]);
+  const [recommended, setRecommended] = useState(null);
+  const [routeGeojson, setRouteGeojson] = useState(null);
+  const [routeInfo, setRouteInfo] = useState(null);
+  const [hazards, setHazards] = useState([]);
+  const [dangerCircles, setDangerCircles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [noSafeRoute, setNoSafeRoute] = useState(false);
 
-  const routeOptions = [
-    {
-      id: "safe",
-      name: "AI Safe Evacuation Route",
-      badge: "RECOMMENDED",
-      tone: "safe",
-      distance: "2.8 km",
-      duration: "9 mins",
-      safetyScore: "98% SAFE",
-      hazardsBypassed: ["Avoids Flooded Creek Crossing at 5th St", "Bypasses Unstable Slope on Hillside Dr"],
-      pathColor: C.teal,
-      notes: "Elevated path along Ridge Parkway with emergency lighting & cell coverage",
-    },
-    {
-      id: "standard",
-      name: "Standard GPS Direct Route",
-      badge: "DANGEROUS",
-      tone: "critical",
-      distance: "2.1 km",
-      duration: "6 mins",
-      safetyScore: "35% RISK",
-      hazardsBypassed: [],
-      pathColor: C.red,
-      notes: "⚠️ Standard GPS directs through active 0.6m deep flood water on Main St",
-    },
-  ];
+  const [simulation, setSimulation] = useState(null);
+  const [simRadius, setSimRadius] = useState(500);
+  const [aiMessages, setAiMessages] = useState([]);
+  const [aiConfidence, setAiConfidence] = useState(0);
+  const [aiRunning, setAiRunning] = useState(false);
+  const [weatherData] = useState(generateDemoWeather);
+  const [routeAnimKey, setRouteAnimKey] = useState(0);
+
+  const simIntervalRef = useRef(null);
+  const aiIntervalRef = useRef(null);
+  const aiStepRef = useRef(0);
+
+  useEffect(() => {
+    run();
+    return () => {
+      if (simIntervalRef.current) clearInterval(simIntervalRef.current);
+      if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
+    };
+  }, []);
+
+  const runAiAnalysis = useCallback(async (haz, circles, sh) => {
+    setAiRunning(true);
+    setAiMessages([]);
+    aiStepRef.current = 0;
+    setAiConfidence(0);
+
+    const interval = setInterval(() => {
+      aiStepRef.current += 1;
+      if (aiStepRef.current <= AI_MESSAGES.length) {
+        setAiMessages((prev) => [...prev, AI_MESSAGES[aiStepRef.current - 1]]);
+        const conf = Math.min(99, aiStepRef.current * 16 + Math.floor(Math.random() * 5));
+        setAiConfidence(conf);
+      }
+      if (aiStepRef.current >= AI_MESSAGES.length + 2) {
+        clearInterval(interval);
+        setAiConfidence(99);
+        setAiRunning(false);
+      }
+    }, 500);
+
+    aiIntervalRef.current = interval;
+  }, []);
+
+  const run = async () => {
+    setLoading(true);
+    setNoSafeRoute(false);
+    const startTime = Date.now();
+    const coords = await shelterService.getUserLocation();
+    setUserCoords(coords);
+
+    const [shelterRes, alertsRes, fireRes, quakeRes] = await Promise.allSettled([
+      shelterService.fetchNearestShelters(coords.lat, coords.lon, 10),
+      api.weather.alerts(coords.lat, coords.lon),
+      api.wildfire.hotspots(),
+      api.earthquake.recent(1, 48, coords.lat, coords.lon, 200),
+    ]);
+
+    const found = shelterRes.status === "fulfilled" && shelterRes.value.success ? shelterRes.value.shelters : [];
+    setShelters(found);
+
+    const alerts = alertsRes.status === "fulfilled" ? alertsRes.value?.alerts || [] : [];
+    const allWildfires = fireRes.status === "fulfilled" ? fireRes.value?.data || [] : [];
+    const allQuakes = quakeRes.status === "fulfilled" ? quakeRes.value?.data?.events || [] : [];
+
+    const nearWildfires = allWildfires.filter((w) => calculateHaversineMiles(coords.lat, coords.lon, w.latitude, w.longitude) < 20);
+    const nearQuakes = allQuakes.filter((q) => calculateHaversineMiles(coords.lat, coords.lon, q.lat, q.lon) < 20);
+
+    const haz = [];
+    if (nearWildfires.length > 0) haz.push({ type: "fire", count: 1, items: nearWildfires.slice(0, 1), key: `fire-${Date.now()}` });
+    if (nearQuakes.length > 0) haz.push({ type: "quake", count: 1, items: nearQuakes.slice(0, 1), key: `quake-${Date.now()}` });
+    if (alerts.length > 0) haz.push({ type: "alert", count: 1, items: alerts.slice(0, 1), key: `alert-${Date.now()}` });
+
+    if (haz.length === 0) {
+      haz.push({ type: "fire", count: 1, items: [{ latitude: coords.lat + 0.02, longitude: coords.lon + 0.01 }], key: `fire-${Date.now()}` });
+    }
+    setHazards(haz);
+
+    const circles = buildDangerCircles(haz);
+    setDangerCircles(circles);
+
+    const shelterList = shelterService.generateDemoShelters(coords.lat, coords.lon, found);
+    setShelters(shelterList);
+
+    const nearest = findNearestSafeShelter(shelterList, circles, coords);
+    if (nearest) {
+      setRecommended(nearest);
+      await calculateRoute(coords, nearest, circles);
+    } else {
+      setNoSafeRoute(true);
+    }
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 3000) {
+      await new Promise((r) => setTimeout(r, 3000 - elapsed));
+    }
+    setLoading(false);
+  };
+
+  function buildDangerCircles(hazList) {
+    const circles = [];
+    hazList.forEach((h) => {
+      h.items.forEach((item) => {
+        let lat, lon;
+        if (h.type === "fire") { lat = item.latitude; lon = item.longitude; }
+        else if (h.type === "quake") { lat = item.lat; lon = item.lon; }
+        else if (h.type === "flood") { lat = item.latitude; lon = item.longitude; }
+        else if (h.type === "earthquake") { lat = item.lat; lon = item.lon; }
+        else if (h.type === "alert" && item.geometry?.coordinates?.[0]) {
+          const c = item.geometry.coordinates[0];
+          if (Array.isArray(c[0])) {
+            const avg = c.reduce((a, p) => [a[0] + p[0], a[1] + p[1]], [0, 0]);
+            lon = avg[0] / c.length; lat = avg[1] / c.length;
+          }
+        }
+        if (lat && lon) {
+          const dt = DISASTER_TYPES.find((d) => d.id === h.type);
+          circles.push({
+            lat, lon, key: `${h.type}-${lat}-${lon}`,
+            color: dt?.color || C.red,
+            radius: 500,
+            radiusMiles: 0.125,
+          });
+        }
+      });
+    });
+    return circles;
+  }
+
+  function findNearestSafeShelter(shelterList, circles, coords) {
+    if (!shelterList || shelterList.length === 0) return null;
+    const sorted = [...shelterList].sort((a, b) => a.distMiles - b.distMiles);
+    const safe = sorted.filter((s) => !isShelterInDanger(s, circles));
+    return safe.length > 0 ? safe[0] : null;
+  }
+
+  function recheckShelterSafety(currentShelter, allShelters, circles, userCoords) {
+    if (!currentShelter) return null;
+    if (!isShelterInDanger(currentShelter, circles)) return currentShelter;
+    return findNearestSafeShelter(allShelters, circles, userCoords);
+  }
+
+  async function calculateRoute(origin, destination, circles) {
+    if (!origin || !destination) return;
+    setRouteLoading(true);
+    setNoSafeRoute(false);
+    setRouteGeojson(null);
+
+    const routeRes = await routeService.calculateEvacuationRoute(origin, destination, "driving");
+    if (routeRes.success && routeRes.routes) {
+      const safeRoute = routeService.pickSafestRoute(routeRes.routes, circles);
+      if (safeRoute) {
+        setRouteInfo(safeRoute);
+        setRouteGeojson(routeService.toPolylineGeoJSON(safeRoute));
+        setRouteAnimKey((k) => k + 1);
+      } else {
+        setNoSafeRoute(true);
+        setRouteInfo(null);
+      }
+    } else {
+      setNoSafeRoute(true);
+    }
+    setRouteLoading(false);
+  }
+
+  const handleShelterSelect = useCallback(async (s) => {
+    if (isShelterInDanger(s, dangerCircles)) return;
+    setRecommended(s);
+    await calculateRoute(userCoords, s, dangerCircles);
+  }, [userCoords, dangerCircles]);
+
+  function startSimulation(type) {
+    if (simIntervalRef.current) clearInterval(simIntervalRef.current);
+    if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
+
+    if (!userCoords) return;
+
+    const severity = SEVERITY_LEVELS[Math.floor(Math.random() * SEVERITY_LEVELS.length)];
+    const pos = generateCoordsNearby(userCoords.lat, userCoords.lon);
+    const dt = DISASTER_TYPES.find((d) => d.id === type) || DISASTER_TYPES[0];
+
+    const sim = {
+      type,
+      label: dt.label,
+      emoji: dt.emoji,
+      color: dt.color,
+      lat: pos.lat,
+      lon: pos.lon,
+      severity,
+      confidence: `${85 + Math.floor(Math.random() * 14)}%`,
+      key: `sim-${type}-${Date.now()}`,
+      time: new Date().toISOString(),
+      currentRadius: 200,
+    };
+
+    setSimulation(sim);
+    setSimRadius(200);
+    setAiMessages([]);
+    aiStepRef.current = 0;
+    setAiRunning(true);
+    setAiConfidence(0);
+
+    const simHazard = { type, count: 1, items: [{ latitude: pos.lat, longitude: pos.lon }], key: sim.key };
+    setHazards([simHazard, ...hazards.filter((h) => !h.key?.startsWith("sim-"))]);
+
+    const newCircles = [{
+      lat: pos.lat, lon: pos.lon, key: sim.key,
+      color: dt.color, radius: 200, radiusMiles: 0.05,
+    }, ...dangerCircles.filter((d) => !d.key?.startsWith("sim-"))];
+    setDangerCircles(newCircles);
+
+    runAiAnalysis([simHazard], newCircles, null);
+
+    let step = 0;
+    simIntervalRef.current = setInterval(() => {
+      step += 1;
+      const newRadius = Math.min(200 + step * 30, 800);
+      setSimRadius(newRadius);
+      setSimulation((prev) => ({ ...prev, currentRadius: newRadius }));
+      setDangerCircles((prev) => {
+        const updated = prev.map((d) =>
+          d.key === sim.key
+            ? { ...d, radius: newRadius, radiusMiles: 0.03 + (newRadius / 800) * 0.12 }
+            : d
+        );
+        if (step % 2 === 0) {
+          setTimeout(() => {
+            setRecommended((current) => {
+              if (!current) return current;
+              const nextSafe = recheckShelterSafety(current, shelters, updated, userCoords);
+              if (nextSafe && nextSafe.id !== current.id) {
+                setRecommended(nextSafe);
+                calculateRoute(userCoords, nextSafe, updated);
+              } else if (!nextSafe) {
+                setNoSafeRoute(true);
+              }
+              return nextSafe || current;
+            });
+          }, 0);
+        }
+        return updated;
+      });
+      if (newRadius >= 800) {
+        clearInterval(simIntervalRef.current);
+      }
+    }, 800);
+
+    setTimeout(() => {
+      if (recommended) {
+        calculateRoute(userCoords, recommended, [...newCircles]);
+      }
+    }, 500);
+  }
+
+  function startRandomSimulation() {
+    const types = DISASTER_TYPES.map((d) => d.id);
+    const randomType = types[Math.floor(Math.random() * types.length)];
+    startSimulation(randomType);
+  }
+
+  const severity = hazards.some((h) => h.type === "fire" || h.type === "alert") ? "danger" : hazards.length > 0 ? "caution" : "safe";
+  const sevColor = severity === "danger" ? C.red : severity === "caution" ? "#D97706" : C.teal;
+  const sevLabel = severity === "danger" ? "EVACUATE" : severity === "caution" ? "CAUTION" : "SAFE";
+  const sevBg = severity === "danger" ? C.red + "18" : severity === "caution" ? "#D9770618" : C.teal + "18";
+
+  const mapCenter = recommended
+    ? [recommended.lat, recommended.lon]
+    : userCoords
+      ? [userCoords.lat, userCoords.lon]
+      : [40.802, -124.163];
+
+  const safetyScore = recommended ? getSafetyScore(recommended, dangerCircles) : 0;
 
   return (
-    <div style={{ animation: "fadeIn 0.3s ease" }}>
-      <PageHeader
-        icon={Route}
-        title="Safe Route Optimization Engine"
-        subtitle="Generates evacuation routes by combining GeoAI hazard maps, USGS gauges, and real-time road closures"
-        tone="info"
-      />
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%", animation: "fadeIn 0.3s ease" }}>
+      {/* Status Bar */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+        padding: "10px 16px", borderRadius: 14, flexWrap: "wrap",
+        border: `1px solid ${sevColor}55`,
+        background: `linear-gradient(135deg, ${sevColor}18, var(--bg, #0F172A))`,
+      }}>
+        <div style={H}>
+          {loading ? (
+            <div style={{ width: 18, height: 18, border: `2px solid ${C.line}`, borderTopColor: C.teal, borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          ) : (
+            <ShieldCheck size={20} color={sevColor} />
+          )}
+          <div>
+            <div style={H}>
+              <span style={{ fontSize: 14, fontWeight: 800, color: C.text }}>{loading ? "Scanning..." : "Escape Route"}</span>
+              {!loading && (
+                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: `${sevColor}22`, color: sevColor, fontWeight: 800 }}>
+                  {sevLabel}
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: C.textDim }}>
+              {loading ? "Detecting location & hazards..." : hazards.map((h) => `${h.count} ${h.type}`).join(" · ") || "No threats"}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <Button variant="secondary" onClick={run} disabled={loading} style={{ padding: "6px 12px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
+            {loading ? "..." : "Rescan"}
+          </Button>
+        </div>
+      </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.8fr", gap: 18 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <Panel title="Route Parameters">
-            <form aria-label="Safe route form" onSubmit={(e) => { e.preventDefault(); setSearched(true); }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <div style={{ position: "relative" }}>
-                  <LocateFixed size={16} color={C.teal} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} aria-hidden />
-                  <label htmlFor="start" className="mono" style={{ display: "none" }}>Start</label>
-                  <input
-                    id="start" value={start} onChange={(e) => setStart(e.target.value)}
-                    placeholder="Start location" aria-label="Start location"
-                    style={{
-                      width: "100%", background: C.panel2, border: `1px solid ${C.line}`,
-                      borderRadius: 10, padding: "12px 16px 12px 40px", color: C.text, fontSize: 13,
-                    }}
-                  />
-                </div>
-                <div style={{ position: "relative" }}>
-                  <MapPin size={16} color={C.red} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} aria-hidden />
-                  <label htmlFor="dest" className="mono" style={{ display: "none" }}>Destination</label>
-                  <input
-                    id="dest" value={dest} onChange={(e) => setDest(e.target.value)}
-                    placeholder="Destination" aria-label="Destination"
-                    style={{
-                      width: "100%", background: C.panel2, border: `1px solid ${C.line}`,
-                      borderRadius: 10, padding: "12px 16px 12px 40px", color: C.text, fontSize: 13,
-                    }}
-                  />
-                </div>
+      {/* Simulation Controls */}
+      <div style={{
+        display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center",
+        padding: "8px 14px", borderRadius: 12,
+        border: `1px solid ${simulation ? C.amber + "55" : C.line}`,
+        background: simulation ? `${C.amber}08` : C.panel,
+      }}>
+        <div style={H}>
+          <Zap size={14} color={simulation ? C.amber : C.textFaint} />
+          <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: simulation ? C.amber : C.textFaint }}>
+            {simulation ? "Simulation Active" : "Simulation Mode"}
+          </span>
+        </div>
+        {DISASTER_TYPES.map((dt) => (
+          <Button
+            key={dt.id}
+            variant="secondary"
+            onClick={() => startSimulation(dt.id)}
+            disabled={loading || aiRunning}
+            style={{
+              padding: "5px 12px", fontSize: 12, fontWeight: 700,
+              border: `1px solid ${simulation?.type === dt.id ? dt.color + "66" : C.line}`,
+              background: simulation?.type === dt.id ? `${dt.color}15` : "transparent",
+              color: simulation?.type === dt.id ? dt.color : C.text,
+            }}
+          >
+            {dt.emoji} Start {dt.label}
+          </Button>
+        ))}
+        <Button
+          variant="secondary"
+          onClick={startRandomSimulation}
+          disabled={loading || aiRunning}
+          style={{ padding: "5px 12px", fontSize: 12, fontWeight: 700 }}
+        >
+          🎲 Random
+        </Button>
+      </div>
 
-                {/* Hazard Avoidance Filters */}
-                <div style={{ padding: 12, background: C.panel2, borderRadius: 10, border: `1px solid ${C.line}` }}>
-                  <div style={{ fontSize: 12, fontFamily: fontMono, color: C.textFaint, textTransform: "uppercase", marginBottom: 8 }}>
-                    Hazard Avoidance Filters
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.text, cursor: "pointer" }}>
-                      <input type="checkbox" checked={avoidFloods} onChange={(e) => setAvoidFloods(e.target.checked)} style={{ accentColor: C.teal }} />
-                      Bypass Flood Inundation Zones
-                    </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.text, cursor: "pointer" }}>
-                      <input type="checkbox" checked={avoidLandslides} onChange={(e) => setAvoidLandslides(e.target.checked)} style={{ accentColor: C.teal }} />
-                      Avoid Unstable Slope & Landslide Slopes
-                    </label>
-                  </div>
-                </div>
+      {/* Dashboard Cards */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+        gap: 8,
+      }}>
+        {/* Disaster Status */}
+        <div style={{
+          ...cardStyle,
+          borderLeft: `4px solid ${sevColor}`,
+        }}>
+          <div style={cardHeader}>
+            <ShieldAlert size={14} color={sevColor} />
+            <span style={cardTitle}>Disaster Status</span>
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: sevColor, fontFamily: fontMono }}>
+            {sevLabel}
+          </div>
+          <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
+            {hazards.length > 0 ? `${hazards.length} active threat(s)` : "All clear"}
+          </div>
+          <span style={badge(sevColor, sevBg)}>{sevLabel}</span>
+        </div>
 
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Button type="submit" ariaLabel="Find safe route" style={{ flex: 1, padding: "12px 20px", fontWeight: 700 }}>
-                    <Sparkles size={16} /> Recalculate AI Safe Route
-                  </Button>
-                </div>
+        {/* Current Location */}
+        <div style={cardStyle}>
+          <div style={cardHeader}>
+            <MapPin size={14} color={C.blue} />
+            <span style={cardTitle}>Location</span>
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.text, fontFamily: fontMono }}>
+            {userCoords ? `${userCoords.lat.toFixed(4)}, ${userCoords.lon.toFixed(4)}` : "---"}
+          </div>
+          <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
+            {userCoords?.accuracy ? `±${Math.round(userCoords.accuracy)}m accuracy` : "Acquiring..."}
+          </div>
+          <span style={badge(C.teal, C.teal + "18")}>
+            {userCoords?.isRealGPS ? "GPS Active" : "Approximate"}
+          </span>
+        </div>
+
+        {/* Safe Shelter */}
+        <div style={{
+          ...cardStyle,
+          borderLeft: `4px solid ${recommended ? C.teal : C.red}`,
+        }}>
+          <div style={cardHeader}>
+            <Home size={14} color={recommended ? C.teal : C.red} />
+            <span style={cardTitle}>Nearest Safe Shelter</span>
+          </div>
+          {recommended ? (
+            <>
+              <div style={{ fontSize: 14, fontWeight: 800, color: C.text }}>{recommended.name}</div>
+              <div style={{ fontSize: 11, color: C.textDim, marginTop: 1 }}>
+                {recommended.dist} · {recommended.status || "Available"}
               </div>
-            </form>
-          </Panel>
+              <div style={{ fontSize: 11, color: C.textDim, fontFamily: fontMono, marginTop: 2 }}>
+                🚶 {Math.round((recommended.distMiles || 0) * 20)} min walk · 🚗 {Math.max(1, Math.round((recommended.distMiles || 0) * 2))} min drive
+              </div>
+              <span style={badge(safetyScore > 70 ? C.teal : safetyScore > 30 ? C.amber : C.red, "transparent")}>
+                Safety: {safetyScore}%
+              </span>
+            </>
+          ) : (
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.red, padding: "4px 0" }}>
+              No safe shelter available nearby.
+            </div>
+          )}
+        </div>
 
-          {/* Route Comparison Options */}
-          {searched && (
-            <Panel title="Route Comparison" role="region" aria-live="polite">
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {routeOptions.map((opt) => {
-                  const isSel = selectedRouteOption === opt.id;
-                  const isSafe = opt.id === "safe";
+        {/* Route Info */}
+        <div style={cardStyle}>
+          <div style={cardHeader}>
+            <Route size={14} color={routeInfo ? C.teal : C.textFaint} />
+            <span style={cardTitle}>Route</span>
+          </div>
+          {routeLoading ? (
+            <div style={{ fontSize: 12, color: C.textFaint }}>Calculating route...</div>
+          ) : routeInfo ? (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.text, fontFamily: fontMono }}>
+                🚗 {routeInfo.distance_km} km · {routeInfo.duration_min} min
+              </div>
+              <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
+                🚶 ~{recommended ? Math.round((recommended.distMiles || 0) * 20) : "—"} min walking
+              </div>
+              <span style={badge(C.teal, C.teal + "18")}>Available</span>
+            </>
+          ) : noSafeRoute ? (
+            <>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.red }}>No safe route</div>
+              <div style={{ fontSize: 10, color: C.textDim }}>Avoid danger zone</div>
+              <span style={badge(C.red, C.red + "18")}>Blocked</span>
+            </>
+          ) : !recommended ? (
+            <>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.red }}>No safe shelter</div>
+              <div style={{ fontSize: 10, color: C.textDim }}>All shelters in danger zone</div>
+              <span style={badge(C.red, C.red + "18")}>Unreachable</span>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 12, color: C.textFaint }}>Select a shelter</div>
+              <span style={badge(C.textFaint, "transparent")}>Pending</span>
+            </>
+          )}
+        </div>
 
-                  return (
-                    <div
-                      key={opt.id}
-                      onClick={() => setSelectedRouteOption(opt.id)}
-                      role="button" tabIndex={0}
-                      style={{
-                        background: isSel ? (isSafe ? C.tealDim : C.redDim) : C.panel2,
-                        border: `1.5px solid ${isSel ? (isSafe ? C.teal : C.red) : C.line}`,
-                        borderRadius: 12,
-                        padding: 14,
-                        cursor: "pointer",
-                        transition: "all 0.15s ease",
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <span style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{opt.name}</span>
-                        <Badge tone={opt.tone}>{opt.badge}</Badge>
+        {/* Weather */}
+        <div style={cardStyle}>
+          <div style={cardHeader}>
+            <CloudSun size={14} color={C.blue} />
+            <span style={cardTitle}>Weather</span>
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: C.text, fontFamily: fontMono }}>
+            {weatherData.temp}°F
+          </div>
+          <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
+            {weatherData.condition} · {weatherData.windSpeed} mph {weatherData.windDir}
+          </div>
+          <span style={badge(C.blue, C.blue + "18")}>Demo</span>
+        </div>
+      </div>
+
+      {/* Main Grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 10, flex: 1, minHeight: 0 }}>
+        {/* Left Panel */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, overflow: "hidden" }}>
+          {/* AI Analysis Panel */}
+          <div style={{
+            border: `1px solid ${aiRunning ? "#7C3AED" : C.line}`,
+            borderRadius: 12, padding: 12,
+            background: aiRunning ? `linear-gradient(135deg, #7C3AED08, ${C.panel})` : C.panel,
+            minHeight: aiMessages.length > 0 ? "auto" : 0,
+            flexShrink: 0,
+          }}>
+            <div style={H}>
+              <Sparkles size={14} color={aiRunning ? "#7C3AED" : C.textFaint} />
+              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: aiRunning ? "#7C3AED" : C.textFaint }}>
+                AI GeoAI Analysis
+              </span>
+              {aiRunning && (
+                <div style={{
+                  width: 12, height: 12, border: `2px solid #7C3AED44`,
+                  borderTopColor: "#7C3AED", borderRadius: "50%",
+                  animation: "spin 0.6s linear infinite", marginLeft: "auto",
+                }} />
+              )}
+              {!aiRunning && aiConfidence > 0 && (
+                <span style={{
+                  marginLeft: "auto", fontSize: 11, fontWeight: 800, fontFamily: fontMono,
+                  color: C.teal,
+                }}>
+                  {aiConfidence}% confident
+                </span>
+              )}
+            </div>
+            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3 }}>
+              {aiMessages.map((msg, i) => (
+                <div
+                  key={i}
+                  style={{
+                    fontSize: 12, color: i === aiMessages.length - 1 && aiRunning ? "#7C3AED" : C.textDim,
+                    animation: "fadeInUp 0.3s ease both",
+                    padding: "2px 0",
+                    fontWeight: i === aiMessages.length - 1 && aiRunning ? 700 : 400,
+                  }}
+                >
+                  <span style={{ color: i === aiMessages.length - 1 && aiRunning ? "#7C3AED" : C.teal, marginRight: 6 }}>
+                    {i === aiMessages.length - 1 && aiRunning ? ">" : "✓"}
+                  </span>
+                  {msg}
+                </div>
+              ))}
+              {aiRunning && (
+                <div style={{
+                  fontSize: 12, color: "#7C3AED", fontWeight: 700,
+                  animation: "blink 1s step-end infinite", padding: "2px 0",
+                }}>
+                  <span style={{ color: "#7C3AED", marginRight: 6 }}>▌</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Nearest Safe Shelters */}
+          <div style={{
+            display: "flex", flexDirection: "column", gap: 6,
+            border: `1px solid ${C.line}`, borderRadius: 12, padding: 12,
+            background: C.panel, flex: 1, overflowY: "auto", minHeight: 0,
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: C.textFaint, marginBottom: 4 }}>
+              <Home size={13} style={{ verticalAlign: -2, marginRight: 5 }} />
+              Nearest Safe Shelters
+            </div>
+            {loading ? (
+              <div style={{ fontSize: 12, color: C.textFaint, padding: "8px 0" }}>Loading shelters...</div>
+            ) : shelters.length === 0 ? (
+              <div style={{ fontSize: 12, color: C.textFaint, padding: "8px 0" }}>No shelters found nearby.</div>
+            ) : (
+              shelters.slice(0, 10).map((s, idx) => {
+                const isRec = recommended?.id === s.id;
+                const inDanger = isShelterInDanger(s, dangerCircles);
+                const score = getSafetyScore(s, dangerCircles);
+                return (
+                  <div
+                    key={s.id} role="button" tabIndex={0}
+                    onClick={() => handleShelterSelect(s)}
+                    style={{
+                      cursor: inDanger ? "not-allowed" : "pointer",
+                      padding: "10px 12px", borderRadius: 8,
+                      background: isRec ? `${C.teal}15` : inDanger ? `${C.red}08` : C.panel2,
+                      border: `1px solid ${isRec ? C.teal : inDanger ? C.red + "44" : C.line}`,
+                      opacity: inDanger ? 0.55 : 1,
+                      transition: "all 0.15s",
+                      animation: `fadeInUp 0.3s ease ${idx * 0.04}s both`,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={H}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: inDanger ? C.red : C.text }}>{s.name}</div>
+                        {inDanger && <AlertTriangle size={12} color={C.red} />}
                       </div>
-
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6, fontSize: 13, fontFamily: fontMono }}>
-                        <span style={{ color: opt.pathColor, fontWeight: 700 }}>{opt.distance} &middot; {opt.duration}</span>
-                        <span style={{ color: isSafe ? C.teal : C.red, fontWeight: 700 }}>{opt.safetyScore}</span>
-                      </div>
-
-                      <div style={{ fontSize: 12, color: C.textDim, marginTop: 8, lineHeight: 1.4 }}>
-                        {opt.notes}
-                      </div>
-
-                      {opt.hazardsBypassed.length > 0 && (
-                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.lineSoft}` }}>
-                          {opt.hazardsBypassed.map((h, i) => (
-                            <div key={i} style={{ fontSize: 11, color: C.teal, display: "flex", alignItems: "center", gap: 4 }}>
-                              <ShieldCheck size={12} /> {h}
-                            </div>
-                          ))}
-                        </div>
+                      <span style={{ fontSize: 11, fontFamily: fontMono, color: isRec ? C.teal : C.textDim, fontWeight: 700 }}>{s.dist}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.textFaint, marginTop: 2 }}>{s.address}</div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 4, fontSize: 11, color: C.textDim, alignItems: "center" }}>
+                      <span>{inDanger ? "In danger zone" : s.status}</span>
+                      {s.occupied != null && s.total && !inDanger && (
+                        <span>{s.occupied}/{s.total}</span>
                       )}
+                      {!inDanger && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700,
+                          color: score > 70 ? C.teal : score > 30 ? C.amber : C.red,
+                          marginLeft: "auto",
+                        }}>
+                          {score}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Hazards quick view */}
+          {hazards.length > 0 && !loading && (
+            <div style={{ padding: 14, borderRadius: 12, border: `1px solid ${C.red}33`, background: `${C.red}08`, flexShrink: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: C.textFaint, marginBottom: 8 }}>
+                <AlertTriangle size={12} style={{ verticalAlign: -2, marginRight: 4 }} color={C.red} />
+                Active Threats
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {hazards.map((h, i) => {
+                  const dt = DISASTER_TYPES.find((d) => d.id === h.type);
+                  return (
+                    <div key={i} style={H}>
+                      <span style={{ fontSize: 16 }}>{dt?.emoji || "⚠️"}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
+                        {h.type.charAt(0).toUpperCase() + h.type.slice(1)} Hazard
+                        {simulation?.key === h.key && (
+                          <span style={{
+                            fontSize: 10, marginLeft: 6, color: C.amber, fontWeight: 800,
+                          }}>SIM</span>
+                        )}
+                      </span>
                     </div>
                   );
                 })}
               </div>
-            </Panel>
+            </div>
+          )}
+
+          {/* Safe Shelter Card */}
+          {!loading && (
+            <div style={{
+              flexShrink: 0,
+              padding: 16, borderRadius: 12, display: "flex", flexDirection: "column",
+              border: `2px solid ${!recommended ? C.red : noSafeRoute ? C.amber : C.teal}`,
+              background: `linear-gradient(135deg, ${!recommended ? C.red : noSafeRoute ? C.amber : C.teal}18, transparent)`,
+              animation: "fadeInUp 0.3s ease",
+            }}>
+              {recommended ? (
+                <>
+                  <div>
+                    <div style={H}>
+                      <ShieldCheck size={18} color={noSafeRoute ? C.amber : C.teal} />
+                      <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: noSafeRoute ? C.amber : C.teal }}>
+                        Nearest Safe Shelter
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: C.text, marginTop: 6 }}>{recommended.name}</div>
+                    <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>{recommended.address}</div>
+                    <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 12, fontFamily: fontMono }}>
+                      <span style={{ color: C.teal, fontWeight: 700 }}>{recommended.dist}</span>
+                      <span style={{ color: C.textDim }}>Cap: {recommended.cap}</span>
+                      <span style={{ color: safetyScore > 70 ? C.teal : safetyScore > 30 ? C.amber : C.red, fontWeight: 700 }}>
+                        {safetyScore}% safe
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.textDim, fontFamily: fontMono, marginTop: 4 }}>
+                      🚶 ~{Math.round((recommended.distMiles || 0) * 20)} min walk · 🚗 ~{Math.max(1, Math.round((recommended.distMiles || 0) * 2))} min drive
+                    </div>
+                  </div>
+                  {routeInfo && (
+                    <div style={{ marginTop: 12, padding: "10px 12px", background: `${C.teal}15`, borderRadius: 8, border: `1px solid ${C.teal}33` }}>
+                      <div style={H}>
+                        <Navigation size={14} color={C.teal} />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
+                          🚗 {routeInfo.distance_km} km · {routeInfo.duration_min} min
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {noSafeRoute && (
+                    <div style={{ marginTop: 10, fontSize: 12, color: C.amber, fontWeight: 700, padding: "8px 10px", background: `${C.amber}10`, borderRadius: 8 }}>
+                      ⚠ Route blocked by danger zone. Selecting next safest shelter...
+                    </div>
+                  )}
+                  <Button
+                    variant={noSafeRoute ? "warning" : "success"}
+                    disabled={!routeInfo}
+                    onClick={() => alert("Evacuation started. Follow the route to safety.")}
+                    style={{ width: "100%", marginTop: 12, padding: "12px", fontWeight: 800, fontSize: 15 }}
+                  >
+                    <Navigation size={16} /> Start Evacuation
+                  </Button>
+                </>
+              ) : (
+                <div style={{ textAlign: "center", padding: "16px 0" }}>
+                  <AlertTriangle size={28} color={C.red} style={{ marginBottom: 8 }} />
+                  <div style={{ fontSize: 14, fontWeight: 800, color: C.red }}>No safe shelter available nearby.</div>
+                  <div style={{ fontSize: 12, color: C.textDim, marginTop: 4 }}>
+                    All shelters are inside the danger zone or unreachable.
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
-        {/* Map & Turn-by-Turn Panel */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14 }}>
-            <MapFrame height={400}>
-              <rect x="0" y="0" width="100%" height="100%" fill="#E2E8F0" />
-              {/* Draw danger zone hazard polygon */}
-              <polygon points="120,180 240,160 220,260 110,240" fill={`${C.red}33`} stroke={C.red} strokeDasharray="4 4" strokeWidth="2" />
-              <text x="170" y="215" fontFamily={fontMono} fontSize="11" fill={C.red} fontWeight="700" textAnchor="middle">
-                DANGER: FLOOD ZONE (0.6m)
-              </text>
-
-              {/* Standard Route (Red - through hazard) */}
-              <path d="M 60,300 L 170,215 L 340,90" fill="none" stroke={selectedRouteOption === "standard" ? C.red : `${C.red}44`} strokeWidth={selectedRouteOption === "standard" ? "5" : "2.5"} strokeDasharray={selectedRouteOption === "standard" ? undefined : "4 4"} />
-
-              {/* AI Safe Route (Teal - bypassing hazard) */}
-              <path d="M 60,300 L 80,120 L 220,70 L 340,90" fill="none" stroke={selectedRouteOption === "safe" ? C.teal : `${C.teal}44`} strokeWidth={selectedRouteOption === "safe" ? "5" : "2.5"} />
-
-              {/* Waypoint Markers */}
-              <circle cx="60" cy="300" r="8" fill={C.teal} />
-              <text x="60" y="322" fontFamily={fontMono} fontSize="10" fill={C.text} textAnchor="middle">START</text>
-
-              <circle cx="340" cy="90" r="8" fill={C.amber} />
-              <text x="340" y="75" fontFamily={fontMono} fontSize="10" fill={C.amber} textAnchor="middle">SHELTER</text>
-            </MapFrame>
-
-            <div style={{ padding: "14px 18px", borderTop: `1px solid ${C.line}`, background: C.panel2, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: C.text }}>
-                <Navigation size={16} color={C.teal} />
-                <span>Active Route: <strong>{selectedRouteOption === "safe" ? "AI Safe Evacuation Route" : "Standard Direct Route"}</strong></span>
-              </div>
-              <Button variant="success" style={{ padding: "8px 16px", fontWeight: 700 }} onClick={() => alert("Navigation started! Audio guidance enabled.")}>
-                Start Turn-by-Turn GPS
-              </Button>
-            </div>
-          </Panel>
-
-          {/* Turn-by-Turn Steps */}
-          <Panel title="Turn-by-Turn Evacuation Steps">
-            <div className="scrollbar" style={{ maxHeight: 200, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
-              {[
-                { step: "1", text: "Head north on Ridge Parkway away from low-lying valley", dist: "0.8 km", note: "Elevated path" },
-                { step: "2", text: "Turn right onto Highland Blvd (Avoid 5th St Bridge)", dist: "1.2 km", note: "Bypasses flood zone" },
-                { step: "3", text: "Continue straight on Crestview Ave directly to High School Gym", dist: "0.8 km", note: "Shelter entrance ahead" },
-              ].map((s) => (
-                <div key={s.step} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.panel2, borderRadius: 8, border: `1px solid ${C.line}` }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ width: 24, height: 24, borderRadius: "50%", background: C.tealGlow, color: C.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, fontFamily: fontMono }}>
-                      {s.step}
-                    </span>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{s.text}</div>
-                      <div style={{ fontSize: 11, color: C.textFaint }}>{s.note}</div>
-                    </div>
-                  </div>
-                  <span style={{ fontSize: 12, fontFamily: fontMono, color: C.textDim, fontWeight: 700 }}>{s.dist}</span>
-                </div>
-              ))}
-            </div>
-          </Panel>
+        {/* Map */}
+        <div style={{ borderRadius: 14, overflow: "hidden", border: `1px solid ${C.line}`, position: "relative" }}>
+          <MapFrame
+            height={550}
+            center={mapCenter}
+            zoom={13}
+            geojson={routeGeojson}
+            geoStyle={routeService.getPolylineStyle(C.teal)}
+          >
+            <EscapeMapOverlay
+              userCoords={userCoords}
+              dangerCircles={dangerCircles.map((d) => ({
+                ...d,
+                currentRadius: d.key === simulation?.key ? simRadius : undefined,
+              }))}
+              recommended={recommended}
+              hazards={hazards}
+              shelters={shelters}
+              disasterSimulation={simulation}
+              onShelterClick={handleShelterSelect}
+            />
+          </MapFrame>
         </div>
       </div>
     </div>
   );
 }
 
+const cardStyle = {
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: `1px solid ${C.line}`,
+  background: C.panel,
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  animation: "fadeInUp 0.3s ease",
+};
+
+const cardHeader = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+};
+
+const cardTitle = {
+  fontSize: 10,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  color: C.textFaint,
+  letterSpacing: "0.04em",
+};
+
+function badge(color, bg) {
+  return {
+    display: "inline-block",
+    fontSize: 9,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    color,
+    background: bg || `${color}18`,
+    padding: "2px 8px",
+    borderRadius: 4,
+    marginTop: "auto",
+    alignSelf: "flex-start",
+  };
+}
