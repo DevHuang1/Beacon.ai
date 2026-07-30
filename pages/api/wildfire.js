@@ -13,7 +13,7 @@ export default async function handler(req, res) {
       });
     }
     const firmsUrl = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${apiKey}/VIIRS_NOAA20_NRT/world/1`;
-    const firmsRes = await fetchWithTimeout(firmsUrl, {}, 5000);
+    const firmsRes = await fetchWithTimeout(firmsUrl, {}, 3000);
 
     if (!firmsRes.ok) {
       // Clear error so user knows they need a FIRMS key
