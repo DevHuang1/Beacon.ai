@@ -191,6 +191,11 @@ export default function EscapeMapOverlay({
 
       {shelters.map((s) => {
         const isRec = recommended?.id === s.id;
+        const walkingMin = Math.round((s.distMiles || 0) * 20);
+        const drivingMin = Math.max(1, Math.round((s.distMiles || 0) * 2));
+        const availability = s.occupied != null && s.total
+          ? `${s.occupied} / ${s.total} (${Math.round((s.occupied / s.total) * 100)}%)`
+          : "Unknown";
         return (
           <Marker
             key={s.id}
@@ -199,10 +204,10 @@ export default function EscapeMapOverlay({
             eventHandlers={{ click: () => onShelterClick && onShelterClick(s) }}
           >
             <Popup>
-              <div style={{ minWidth: 220, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              <div style={{ minWidth: 240, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                 <div style={{
                   fontWeight: 800, fontSize: 15, color: isRec ? C.teal : "#0F172A",
-                  display: "flex", alignItems: "center", gap: 6, marginBottom: 6,
+                  display: "flex", alignItems: "center", gap: 6, marginBottom: 4,
                 }}>
                   🏠 {s.name}
                   {isRec && (
@@ -212,18 +217,26 @@ export default function EscapeMapOverlay({
                     }}>RECOMMENDED</span>
                   )}
                 </div>
-                {s.address && <div style={{ fontSize: 12, color: "#64748B", marginBottom: 8 }}>{s.address}</div>}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 12px", fontSize: 12, color: "#475569" }}>
-                  <div><strong>Capacity:</strong> {s.cap || s.total || "N/A"}</div>
-                  <div><strong>Occupancy:</strong> {s.occupied != null ? `${s.occupied}` : "Unknown"}</div>
-                  <div><strong>Medical:</strong> {s.facilities?.includes("Medical") || s.medical ? "✅ Available" : "Not available"}</div>
-                  <div><strong>Food & Water:</strong> {s.facilities?.includes("Hot Meals") || s.food ? "✅ Available" : "Not available"}</div>
-                  <div><strong>Distance:</strong> {s.dist}</div>
-                  <div><strong>Status:</strong> {s.status || "Open"}</div>
+                {s.address && <div style={{ fontSize: 12, color: "#64748B", marginBottom: 6 }}>{s.address}</div>}
+                <div style={{ fontSize: 13, fontWeight: 700, color: isRec ? C.teal : "#475569", marginBottom: 6 }}>
+                  📍 {s.dist} from your location
                 </div>
-                {s.distMiles && (
-                  <div style={{ marginTop: 8, fontSize: 11, color: "#64748B", fontFamily: fontMono }}>
-                    {s.distMiles.toFixed(1)} miles from your location
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px 12px", fontSize: 12, color: "#475569" }}>
+                  <div><strong>Capacity:</strong> {s.cap || s.total || "N/A"}</div>
+                  <div><strong>Occupied:</strong> {s.occupied != null ? `${s.occupied}` : "Unknown"}</div>
+                  <div><strong>Availability:</strong> {availability}</div>
+                  <div><strong>Status:</strong> {s.status || "Available"}</div>
+                  <div><strong>Walk:</strong> ~{walkingMin} min</div>
+                  <div><strong>Drive:</strong> ~{drivingMin} min</div>
+                </div>
+                {s.facilities && s.facilities.length > 0 && (
+                  <div style={{ marginTop: 6, display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {s.facilities.map((f) => (
+                      <span key={f} style={{
+                        fontSize: 10, background: C.teal + "12", color: C.teal,
+                        padding: "2px 6px", borderRadius: 4, fontWeight: 600,
+                      }}>{f}</span>
+                    ))}
                   </div>
                 )}
               </div>

@@ -175,8 +175,15 @@ export default function SafeRoutePlanner() {
     const circles = buildDangerCircles(haz);
     setDangerCircles(circles);
 
-    if (found.length > 0) {
-      selectBestShelter(found, circles, coords);
+    const shelterList = shelterService.generateDemoShelters(coords.lat, coords.lon, found);
+    setShelters(shelterList);
+
+    const nearest = findNearestSafeShelter(shelterList, circles, coords);
+    if (nearest) {
+      setRecommended(nearest);
+      await calculateRoute(coords, nearest, circles);
+    } else {
+      setNoSafeRoute(true);
     }
     const elapsed = Date.now() - startTime;
     if (elapsed < 3000) {
@@ -215,28 +222,17 @@ export default function SafeRoutePlanner() {
     return circles;
   }
 
-  async function selectBestShelter(shelterList, circles, coords) {
-    const safeShelters = shelterList.filter((s) => !isShelterInDanger(s, circles));
-    const pool = safeShelters.length > 0 ? safeShelters : shelterList;
+  function findNearestSafeShelter(shelterList, circles, coords) {
+    if (!shelterList || shelterList.length === 0) return null;
+    const sorted = [...shelterList].sort((a, b) => a.distMiles - b.distMiles);
+    const safe = sorted.filter((s) => !isShelterInDanger(s, circles));
+    return safe.length > 0 ? safe[0] : null;
+  }
 
-    const context = {
-      userLocation: { lat: coords.lat.toFixed(4), lon: coords.lon.toFixed(4) },
-      shelters: pool.slice(0, 3).map((s) => ({ name: s.name, distance: s.dist, status: s.status })),
-      hazards: hazards.map((h) => `${h.count} ${h.type}`).join(", ") || "none",
-    };
-
-    const hasHazards = hazards.length > 0;
-    const aiRes = await api.advisor(
-      hasHazards
-        ? `EMERGENCY - Active: ${hazards.map((h) => `${h.count} ${h.type}`).join(", ")}. Find safest shelter near ${coords.lat.toFixed(4)}, ${coords.lon.toFixed(4)}. Name the single best shelter.`
-        : `Precautionary route from ${coords.lat.toFixed(4)}, ${coords.lon.toFixed(4)}. Name the best equipped shelter.`,
-      context
-    );
-    const aiText = aiRes?.data?.text || "";
-    const match = pool.find((s) => aiText.toLowerCase().includes(s.name.toLowerCase()));
-    const best = match || pool[0];
-    setRecommended(best);
-    await calculateRoute(coords, best, circles);
+  function recheckShelterSafety(currentShelter, allShelters, circles, userCoords) {
+    if (!currentShelter) return null;
+    if (!isShelterInDanger(currentShelter, circles)) return currentShelter;
+    return findNearestSafeShelter(allShelters, circles, userCoords);
   }
 
   async function calculateRoute(origin, destination, circles) {
@@ -316,13 +312,29 @@ export default function SafeRoutePlanner() {
       const newRadius = Math.min(200 + step * 30, 800);
       setSimRadius(newRadius);
       setSimulation((prev) => ({ ...prev, currentRadius: newRadius }));
-      setDangerCircles((prev) =>
-        prev.map((d) =>
+      setDangerCircles((prev) => {
+        const updated = prev.map((d) =>
           d.key === sim.key
             ? { ...d, radius: newRadius, radiusMiles: 0.03 + (newRadius / 800) * 0.12 }
             : d
-        )
-      );
+        );
+        if (step % 2 === 0) {
+          setTimeout(() => {
+            setRecommended((current) => {
+              if (!current) return current;
+              const nextSafe = recheckShelterSafety(current, shelters, updated, userCoords);
+              if (nextSafe && nextSafe.id !== current.id) {
+                setRecommended(nextSafe);
+                calculateRoute(userCoords, nextSafe, updated);
+              } else if (!nextSafe) {
+                setNoSafeRoute(true);
+              }
+              return nextSafe || current;
+            });
+          }, 0);
+        }
+        return updated;
+      });
       if (newRadius >= 800) {
         clearInterval(simIntervalRef.current);
       }
@@ -473,22 +485,29 @@ export default function SafeRoutePlanner() {
         {/* Safe Shelter */}
         <div style={{
           ...cardStyle,
-          borderLeft: `4px solid ${recommended ? C.teal : C.textFaint}`,
+          borderLeft: `4px solid ${recommended ? C.teal : C.red}`,
         }}>
           <div style={cardHeader}>
-            <Home size={14} color={recommended ? C.teal : C.textFaint} />
-            <span style={cardTitle}>Safe Shelter</span>
+            <Home size={14} color={recommended ? C.teal : C.red} />
+            <span style={cardTitle}>Nearest Safe Shelter</span>
           </div>
-          <div style={{ fontSize: 14, fontWeight: 800, color: C.text }}>
-            {recommended ? recommended.name : "---"}
-          </div>
-          <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
-            {recommended ? recommended.dist : "No shelter selected"}
-          </div>
-          {recommended && (
-            <span style={badge(safetyScore > 70 ? C.teal : safetyScore > 30 ? C.amber : C.red, "transparent")}>
-              Safety: {safetyScore}%
-            </span>
+          {recommended ? (
+            <>
+              <div style={{ fontSize: 14, fontWeight: 800, color: C.text }}>{recommended.name}</div>
+              <div style={{ fontSize: 11, color: C.textDim, marginTop: 1 }}>
+                {recommended.dist} · {recommended.status || "Available"}
+              </div>
+              <div style={{ fontSize: 11, color: C.textDim, fontFamily: fontMono, marginTop: 2 }}>
+                🚶 {Math.round((recommended.distMiles || 0) * 20)} min walk · 🚗 {Math.max(1, Math.round((recommended.distMiles || 0) * 2))} min drive
+              </div>
+              <span style={badge(safetyScore > 70 ? C.teal : safetyScore > 30 ? C.amber : C.red, "transparent")}>
+                Safety: {safetyScore}%
+              </span>
+            </>
+          ) : (
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.red, padding: "4px 0" }}>
+              No safe shelter available nearby.
+            </div>
           )}
         </div>
 
@@ -499,22 +518,28 @@ export default function SafeRoutePlanner() {
             <span style={cardTitle}>Route</span>
           </div>
           {routeLoading ? (
-            <div style={{ fontSize: 12, color: C.textFaint }}>Calculating...</div>
+            <div style={{ fontSize: 12, color: C.textFaint }}>Calculating route...</div>
           ) : routeInfo ? (
             <>
               <div style={{ fontSize: 13, fontWeight: 700, color: C.text, fontFamily: fontMono }}>
-                {routeInfo.distance_km} km · {routeInfo.duration_min} min
+                🚗 {routeInfo.distance_km} km · {routeInfo.duration_min} min
               </div>
               <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
-                Travel time estimated
+                🚶 ~{recommended ? Math.round((recommended.distMiles || 0) * 20) : "—"} min walking
               </div>
               <span style={badge(C.teal, C.teal + "18")}>Available</span>
             </>
           ) : noSafeRoute ? (
             <>
               <div style={{ fontSize: 12, fontWeight: 700, color: C.red }}>No safe route</div>
-              <div style={{ fontSize: 10, color: C.textDim }}>Try a different shelter</div>
+              <div style={{ fontSize: 10, color: C.textDim }}>Avoid danger zone</div>
               <span style={badge(C.red, C.red + "18")}>Blocked</span>
+            </>
+          ) : !recommended ? (
+            <>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.red }}>No safe shelter</div>
+              <div style={{ fontSize: 10, color: C.textDim }}>All shelters in danger zone</div>
+              <span style={badge(C.red, C.red + "18")}>Unreachable</span>
             </>
           ) : (
             <>
@@ -644,7 +669,9 @@ export default function SafeRoutePlanner() {
                     <div style={{ fontSize: 11, color: C.textFaint, marginTop: 2 }}>{s.address}</div>
                     <div style={{ display: "flex", gap: 8, marginTop: 4, fontSize: 11, color: C.textDim, alignItems: "center" }}>
                       <span>{inDanger ? "In danger zone" : s.status}</span>
-                      {s.cap && !inDanger && <span>Cap: {s.cap}</span>}
+                      {s.occupied != null && s.total && !inDanger && (
+                        <span>{s.occupied}/{s.total}</span>
+                      )}
                       {!inDanger && (
                         <span style={{
                           fontSize: 10, fontWeight: 700,
@@ -690,54 +717,69 @@ export default function SafeRoutePlanner() {
           )}
 
           {/* Safe Shelter Card */}
-          {recommended && !loading && (
+          {!loading && (
             <div style={{
               flexShrink: 0,
               padding: 16, borderRadius: 12, display: "flex", flexDirection: "column",
-              border: `2px solid ${noSafeRoute ? C.red : C.teal}`,
-              background: `linear-gradient(135deg, ${noSafeRoute ? C.red : C.teal}18, transparent)`,
+              border: `2px solid ${!recommended ? C.red : noSafeRoute ? C.amber : C.teal}`,
+              background: `linear-gradient(135deg, ${!recommended ? C.red : noSafeRoute ? C.amber : C.teal}18, transparent)`,
               animation: "fadeInUp 0.3s ease",
             }}>
-              <div>
-                <div style={H}>
-                  <ShieldCheck size={18} color={noSafeRoute ? C.red : C.teal} />
-                  <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: noSafeRoute ? C.red : C.teal }}>
-                    Safe Shelter
-                  </span>
-                </div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: C.text, marginTop: 6 }}>{recommended.name}</div>
-                <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>{recommended.address}</div>
-                <div style={{ display: "flex", gap: 12, marginTop: 10, fontSize: 12, fontFamily: fontMono }}>
-                  <span style={{ color: C.teal, fontWeight: 700 }}>{recommended.dist}</span>
-                  <span style={{ color: C.textDim }}>Cap: {recommended.cap}</span>
-                  <span style={{ color: safetyScore > 70 ? C.teal : safetyScore > 30 ? C.amber : C.red, fontWeight: 700 }}>
-                    Safety: {safetyScore}%
-                  </span>
-                </div>
-              </div>
-              {routeInfo && (
-                <div style={{ marginTop: 12, padding: "10px 12px", background: `${C.teal}15`, borderRadius: 8, border: `1px solid ${C.teal}33` }}>
-                  <div style={H}>
-                    <Navigation size={14} color={C.teal} />
-                    <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
-                      {routeInfo.distance_km} km · {routeInfo.duration_min} min
-                    </span>
+              {recommended ? (
+                <>
+                  <div>
+                    <div style={H}>
+                      <ShieldCheck size={18} color={noSafeRoute ? C.amber : C.teal} />
+                      <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: noSafeRoute ? C.amber : C.teal }}>
+                        Nearest Safe Shelter
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: C.text, marginTop: 6 }}>{recommended.name}</div>
+                    <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>{recommended.address}</div>
+                    <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 12, fontFamily: fontMono }}>
+                      <span style={{ color: C.teal, fontWeight: 700 }}>{recommended.dist}</span>
+                      <span style={{ color: C.textDim }}>Cap: {recommended.cap}</span>
+                      <span style={{ color: safetyScore > 70 ? C.teal : safetyScore > 30 ? C.amber : C.red, fontWeight: 700 }}>
+                        {safetyScore}% safe
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.textDim, fontFamily: fontMono, marginTop: 4 }}>
+                      🚶 ~{Math.round((recommended.distMiles || 0) * 20)} min walk · 🚗 ~{Math.max(1, Math.round((recommended.distMiles || 0) * 2))} min drive
+                    </div>
+                  </div>
+                  {routeInfo && (
+                    <div style={{ marginTop: 12, padding: "10px 12px", background: `${C.teal}15`, borderRadius: 8, border: `1px solid ${C.teal}33` }}>
+                      <div style={H}>
+                        <Navigation size={14} color={C.teal} />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
+                          🚗 {routeInfo.distance_km} km · {routeInfo.duration_min} min
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {noSafeRoute && (
+                    <div style={{ marginTop: 10, fontSize: 12, color: C.amber, fontWeight: 700, padding: "8px 10px", background: `${C.amber}10`, borderRadius: 8 }}>
+                      ⚠ Route blocked by danger zone. Selecting next safest shelter...
+                    </div>
+                  )}
+                  <Button
+                    variant={noSafeRoute ? "warning" : "success"}
+                    disabled={!routeInfo}
+                    onClick={() => alert("Evacuation started. Follow the route to safety.")}
+                    style={{ width: "100%", marginTop: 12, padding: "12px", fontWeight: 800, fontSize: 15 }}
+                  >
+                    <Navigation size={16} /> Start Evacuation
+                  </Button>
+                </>
+              ) : (
+                <div style={{ textAlign: "center", padding: "16px 0" }}>
+                  <AlertTriangle size={28} color={C.red} style={{ marginBottom: 8 }} />
+                  <div style={{ fontSize: 14, fontWeight: 800, color: C.red }}>No safe shelter available nearby.</div>
+                  <div style={{ fontSize: 12, color: C.textDim, marginTop: 4 }}>
+                    All shelters are inside the danger zone or unreachable.
                   </div>
                 </div>
               )}
-              {noSafeRoute && (
-                <div style={{ marginTop: 10, fontSize: 12, color: C.red, fontWeight: 700, padding: "8px 10px", background: `${C.red}10`, borderRadius: 8 }}>
-                  ⚠ Route blocked by danger zone. Try selecting a different shelter.
-                </div>
-              )}
-              <Button
-                variant={noSafeRoute ? "danger" : "success"}
-                disabled={!routeInfo}
-                onClick={() => alert("Evacuation started. Follow the route to safety.")}
-                style={{ width: "100%", marginTop: 12, padding: "12px", fontWeight: 800, fontSize: 15 }}
-              >
-                <Navigation size={16} /> Start Evacuation
-              </Button>
             </div>
           )}
         </div>
