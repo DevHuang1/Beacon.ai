@@ -4,9 +4,9 @@ import MapFrame from "../components/MapFrameWrapper";
 import { Activity, Satellite, ToggleLeft, ToggleRight, MapPin, Clock, ExternalLink, CheckCircle2, Phone } from "lucide-react";
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
+import { useLocation } from "../lib/LocationContext";
 
-function makeDamageGeojson() {
-  const centerLon = -124.16, centerLat = 40.8;
+function makeDamageGeojson(centerLat, centerLon) {
   return {
     type: "FeatureCollection",
     features: [
@@ -20,6 +20,7 @@ function makeDamageGeojson() {
 const DAMAGE_COLORS = { new_construction: C.amber, deforestation: C.red, flooding: C.blue };
 
 export default function EarthquakeInfo() {
+  const loc = useLocation();
   const [minMag, setMinMag] = useState(0);
   const [tab, setTab] = useState("recent");
   const [quakes, setQuakes] = useState([]);
@@ -52,7 +53,7 @@ export default function EarthquakeInfo() {
   const levelColor = { major: C.red, moderate: C.amber, light: C.blue };
   const levelBg = { major: C.redGlow, moderate: C.amberGlow, light: C.blueGlow };
 
-  const damageGeo = damageMode ? makeDamageGeojson() : null;
+  const damageGeo = damageMode ? makeDamageGeojson(loc.lat, loc.lon) : null;
   const damageStyle = (f) => ({ color: DAMAGE_COLORS[f.properties.type] || C.amber, weight: 2, fillColor: DAMAGE_COLORS[f.properties.type] || C.amber, fillOpacity: 0.15 });
 
   return (
@@ -138,7 +139,7 @@ export default function EarthquakeInfo() {
           </div>
 
           <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14 }}>
-            <MapFrame height={520} geojson={damageGeo} geoStyle={damageStyle}>
+            <MapFrame height={520} center={[loc.lat, loc.lon]} geojson={damageGeo} geoStyle={damageStyle}>
               {filtered.map((e, i) => {
                 const x = 40 + (i * 45) % 340;
                 const y = 40 + ((i * 63) % 260);

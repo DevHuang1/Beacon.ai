@@ -12,6 +12,7 @@ import shelterService from "../lib/services/shelterService";
 import routeService from "../lib/services/routeService";
 import { api } from "../lib/api";
 import { calculateHaversineMiles } from "../lib/haversine";
+import { useLocation } from "../lib/LocationContext";
 
 const EscapeMapOverlay = dynamic(() => import("../components/EscapeMapOverlay"), { ssr: false });
 
@@ -84,7 +85,8 @@ function generateDemoWeather() {
 }
 
 export default function SafeRoutePlanner() {
-  const [userCoords, setUserCoords] = useState(null);
+  const loc = useLocation();
+  const [userCoords, setUserCoords] = useState({ lat: loc.lat, lon: loc.lon, isRealGPS: loc.isRealGPS });
   const [shelters, setShelters] = useState([]);
   const [recommended, setRecommended] = useState(null);
   const [routeGeojson, setRouteGeojson] = useState(null);
@@ -113,7 +115,7 @@ export default function SafeRoutePlanner() {
       if (simIntervalRef.current) clearInterval(simIntervalRef.current);
       if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     };
-  }, []);
+  }, [loc.lat, loc.lon]);
 
   const runAiAnalysis = useCallback(async (haz, circles, sh) => {
     setAiRunning(true);
@@ -142,7 +144,7 @@ export default function SafeRoutePlanner() {
     setLoading(true);
     setNoSafeRoute(false);
     const startTime = Date.now();
-    const coords = await shelterService.getUserLocation();
+    const coords = { lat: loc.lat, lon: loc.lon, isRealGPS: loc.isRealGPS };
     setUserCoords(coords);
 
     const [shelterRes, alertsRes, fireRes, quakeRes] = await Promise.allSettled([

@@ -249,7 +249,7 @@ export default function EscapeAssistant() {
       <div style={{ display: "grid", gridTemplateColumns: "1.7fr 1fr", gap: 18 }}>
         <div>
           <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14 }}>
-            <MapFrame height={480} geojson={routeGeojson} geoStyle={routeStyle}>
+            <MapFrame height={480} center={[loc.lat, loc.lon]} geojson={routeGeojson} geoStyle={routeStyle}>
               <EscapeMapContent shelters={sorted} hotspots={hotspots} selectedShelter={selectedShelter} popupRefs={popupRefs} onSelect={selectShelter} />
             </MapFrame>
 

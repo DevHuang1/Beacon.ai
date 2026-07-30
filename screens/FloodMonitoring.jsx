@@ -5,11 +5,11 @@ import SvgOverlayContent from "../components/SvgOverlayContent";
 import { Waves, Droplets, Gauge, TrendingUp, Satellite, ToggleLeft, ToggleRight } from "lucide-react";
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
+import { useLocation } from "../lib/LocationContext";
 
 const TONE_MAP = { high: "critical", moderate: "warning", low: "safe" };
 
-function makeFloodGeojson(waterPct) {
-  const centerLon = -124.16, centerLat = 40.8;
+function makeFloodGeojson(waterPct, centerLat, centerLon) {
   const size = 0.04 * (waterPct / 12);
   return {
     type: "FeatureCollection",
@@ -32,6 +32,7 @@ function makeFloodGeojson(waterPct) {
 }
 
 export default function FloodMonitoring() {
+  const loc = useLocation();
   const [gauges, setGauges] = useState(null);
   const [riskZones, setRiskZones] = useState(null);
   const [stats, setStats] = useState(null);
@@ -63,7 +64,7 @@ export default function FloodMonitoring() {
   const gaugeList = gauges || [];
   const riskList = riskZones || [];
   const hasData = gaugeList.length > 0;
-  const floodGeo = satData ? makeFloodGeojson(satData.water_pct) : null;
+  const floodGeo = satData ? makeFloodGeojson(satData.water_pct, loc.lat, loc.lon) : null;
   const floodStyle = () => ({ color: C.blue, weight: 2, fillColor: C.blue, fillOpacity: 0.15 });
 
   return (
@@ -165,7 +166,7 @@ export default function FloodMonitoring() {
       )}
 
       <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14 }}>
-        <MapFrame height={440} geojson={floodGeo} geoStyle={floodStyle}>
+        <MapFrame height={440} center={[loc.lat, loc.lon]} geojson={floodGeo} geoStyle={floodStyle}>
           <SvgOverlayContent>
             <text x="14" y="24" fontFamily={fontMono} fontSize="10" fill={C.textFaint}>
               {satMode ? "Satellite flood extent overlay · OpenGeoAI" : `${gaugeList.length} active gauges · USGS NWIS`}

@@ -6,9 +6,9 @@ import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
 import firmsService from "../lib/services/firmsService";
 import WildfireHotspotOverlay from "../components/WildfireHotspotOverlayWrapper";
+import { useLocation } from "../lib/LocationContext";
 
-function makeBurnScarGeojson() {
-  const centerLon = -124.14, centerLat = 40.83;
+function makeBurnScarGeojson(centerLat, centerLon) {
   return {
     type: "FeatureCollection",
     features: [{
@@ -31,6 +31,7 @@ function makeBurnScarGeojson() {
 }
 
 export default function WildfireRisk() {
+  const loc = useLocation();
   const [hotspots, setHotspots] = useState([]);
   const [conditions, setConditions] = useState(null);
   const [error, setError] = useState(null);
@@ -58,7 +59,7 @@ export default function WildfireRisk() {
   }, [scarMode]);
 
   const hasData = hotspots.length > 0;
-  const scarGeo = scarMode ? makeBurnScarGeojson() : null;
+  const scarGeo = scarMode ? makeBurnScarGeojson(loc.lat, loc.lon) : null;
   const scarStyle = () => ({ color: C.red, weight: 2, fillColor: "#8B0000", fillOpacity: 0.2 });
 
   const toSvg = (lat, lng) => ({
@@ -110,7 +111,7 @@ export default function WildfireRisk() {
 
       <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: 18 }}>
         <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14, position: "relative" }}>
-          <MapFrame height={460} geojson={scarGeo} geoStyle={scarStyle}>
+          <MapFrame height={460} center={[loc.lat, loc.lon]} geojson={scarGeo} geoStyle={scarStyle}>
             {hasData && <WildfireHotspotOverlay hotspots={hotspots} />}
           </MapFrame>
 

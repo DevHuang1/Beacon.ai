@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { PageHeader, Panel, Button } from "../components";
 import {
   Settings, MapPin, Plus, Trash2, Save, UserPlus, Phone, User,
@@ -34,8 +34,6 @@ function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
-
 export default function Profile() {
   const loc = useLocation();
   const { user } = useAuth();
@@ -51,6 +49,13 @@ export default function Profile() {
   const [cityQuery, setCityQuery] = useState("");
   const [cityResults, setCityResults] = useState([]);
   const [searchingCity, setSearchingCity] = useState(false);
+  const [citySearched, setCitySearched] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const debounceRef = useRef(null);
+
+  useEffect(() => {
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, []);
 
   const [usernameQuery, setUsernameQuery] = useState("");
   const [usernameResults, setUsernameResults] = useState([]);
@@ -91,27 +96,54 @@ export default function Profile() {
   };
 
   const searchCity = useCallback(async (query) => {
-    if (!query || query.trim().length < 2) { setCityResults([]); return; }
+    if (!query || query.trim().length < 2) { setCityResults([]); setCitySearched(false); setSearchError(""); return; }
     setSearchingCity(true);
+    setCitySearched(false);
+    setSearchError("");
     try {
-      const url = `${NOMINATIM_URL}?format=json&q=${encodeURIComponent(query)}&limit=5&accept-language=en`;
-      const res = await fetch(url, { headers: { "User-Agent": "BeaconAI-EmergencyApp/1.0" } });
-      const data = await res.json();
-      setCityResults((data || []).map((r) => ({
-        label: r.display_name,
-        lat: parseFloat(r.lat).toFixed(6),
-        lon: parseFloat(r.lon).toFixed(6),
-      })));
-    } catch {
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}&limit=5`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${res.status}`);
+      }
+      const { results } = await res.json();
+      if (!results || results.length === 0) {
+        setCityResults([]);
+        setCitySearched(true);
+      } else {
+        setCityResults(results.map((r) => ({
+          label: r.label || r.display_name || `${r.lat}, ${r.lon}`,
+          fullLabel: r.fullLabel || r.display_name || r.label || "",
+          lat: r.lat,
+          lon: r.lon,
+          type: r.type || "city",
+        })));
+      }
+    } catch (err) {
       setCityResults([]);
+      setSearchError(err.message || "Search failed");
     }
     setSearchingCity(false);
   }, []);
 
-  const selectCityResult = (r) => {
-    loc.updateLocation(parseFloat(r.lat), parseFloat(r.lon), r.label);
-    setCityQuery(r.label.split(",")[0]);
+  const handleCityInput = (value) => {
+    setCityQuery(value);
     setCityResults([]);
+    setCitySearched(false);
+    setSearchError("");
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (value.trim().length >= 2) {
+      debounceRef.current = setTimeout(() => searchCity(value), 400);
+    }
+  };
+
+  const selectCityResult = (r) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    loc.updateLocation(parseFloat(r.lat), parseFloat(r.lon), r.label);
+    setCityQuery(r.label);
+    setCityResults([]);
+    setCitySearched(false);
+    setSearchError("");
   };
 
   const searchUsername = useCallback(async (query) => {
@@ -293,27 +325,39 @@ export default function Profile() {
             </div>
 
             {/* Search by city/country */}
-            <div>
+            <div style={{ position: "relative" }}>
               <label style={{ display: "block", fontSize: 12, color: C.textDim, fontFamily: fontMono, marginBottom: 4 }}>
                 Search by city, town, or address
               </label>
               <div style={{ position: "relative" }}>
                 <Globe size={15} color={C.textFaint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
-                <input value={cityQuery} onChange={(e) => { setCityQuery(e.target.value); searchCity(e.target.value); }}
+                <input value={cityQuery} onChange={(e) => handleCityInput(e.target.value)}
                   placeholder="e.g. Yangon, Myanmar"
                   style={{ width: "100%", background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "10px 12px 10px 36px", color: C.text, fontSize: 14 }} />
                 {searchingCity && <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: C.textFaint }}>Searching...</span>}
               </div>
               {cityResults.length > 0 && (
-                <div style={{ marginTop: 6, border: `1px solid ${C.line}`, borderRadius: 8, overflow: "hidden" }}>
+                <div style={{ position: "absolute", zIndex: 100, left: 0, right: 0, marginTop: 6, border: `1px solid ${C.line}`, borderRadius: 8, overflow: "hidden", background: C.panel, boxShadow: "0 8px 24px rgba(0,0,0,0.3)" }}>
                   {cityResults.map((r, i) => (
                     <div key={i} onClick={() => selectCityResult(r)}
-                      style={{ padding: "10px 12px", cursor: "pointer", fontSize: 13, color: C.text, background: C.panel, borderBottom: i < cityResults.length - 1 ? `1px solid ${C.lineSoft}` : "none", display: "flex", alignItems: "center", gap: 8 }}>
+                      style={{ padding: "10px 12px", cursor: "pointer", fontSize: 13, color: C.text, background: C.panel, borderBottom: i < cityResults.length - 1 ? `1px solid ${C.lineSoft}` : "none", display: "flex", alignItems: "center", gap: 8, transition: "background 0.1s" }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = C.panel2}
+                      onMouseLeave={(e) => e.currentTarget.style.background = C.panel}>
                       <MapPin size={13} color={C.teal} />
                       <span style={{ flex: 1 }}>{r.label}</span>
                       <span style={{ fontSize: 11, fontFamily: fontMono, color: C.textFaint }}>{r.lat}, {r.lon}</span>
                     </div>
                   ))}
+                </div>
+              )}
+              {citySearched && cityResults.length === 0 && !searchingCity && (
+                <div style={{ marginTop: 6, padding: "10px 12px", fontSize: 13, color: C.textFaint, background: C.panel2, borderRadius: 8, border: `1px solid ${C.line}` }}>
+                  No locations found for "{cityQuery}"
+                </div>
+              )}
+              {searchError && (
+                <div style={{ marginTop: 6, padding: "10px 12px", fontSize: 13, color: C.red, background: C.redDim, borderRadius: 8, border: `1px solid ${C.red}44` }}>
+                  Search error: {searchError}
                 </div>
               )}
             </div>
