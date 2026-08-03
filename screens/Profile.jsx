@@ -8,6 +8,7 @@ import {
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { useLocation } from "../lib/LocationContext";
 import { useAuth } from "../components/AuthProvider";
+import { sendEmergencyAlert } from "../lib/emergencyAlerts";
 
 const STORAGE_KEYS = {
   family: "beacon_profile_family",
@@ -42,6 +43,7 @@ export default function Profile() {
 
   const [family, setFamilyState] = useState(() => loadJSON(STORAGE_KEYS.family, []));
   const [prefs, setPrefsState] = useState(() => loadJSON(STORAGE_KEYS.prefs, { defaultRadius: 10 }));
+  const setPrefs = setPrefsState;
   const [saved, setSaved] = useState(false);
 
   const [showAddForm, setShowAddForm] = useState(false);
@@ -78,6 +80,34 @@ export default function Profile() {
       .catch(() => {});
   }, []);
 
+  // Load family members persisted in Supabase and merge them into the local list.
+  useEffect(() => {
+    fetch("/api/profiles/family")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.success && Array.isArray(d?.data?.members)) {
+          const dbMembers = d.data.members.map((m) => ({
+            id: `db-${m.family_member_id}`,
+            name: m.display_name || m.username || "Family member",
+            phone: "",
+            role: m.role || "Family",
+            username: m.username || null,
+            persisted: true,
+            family_member_id: m.family_member_id,
+          }));
+          setFamilyState((prev) => {
+            const merged = [...prev];
+            dbMembers.forEach((dm) => {
+              const exists = merged.some((m) => m.id === dm.id);
+              if (!exists) merged.push(dm);
+            });
+            return merged;
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const setFamily = useCallback((v) => { setFamilyState(v); setSaved(false); }, []);
 
   const handleSave = () => {
@@ -85,6 +115,18 @@ export default function Profile() {
     saveJSON(STORAGE_KEYS.prefs, prefs);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
+
+    // Publish "my current location" so linked family members can see it.
+    fetch("/api/profiles/shared-location", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ latitude: loc.lat, longitude: loc.lon }),
+    }).then((r) => r.json()).then((d) => {
+      if (d?.code === "TABLE_MISSING") {
+        setUsernameMsg("Profile database not set up — run scripts/setup-profiles.sql to share location with family.");
+        setTimeout(() => setUsernameMsg(""), 4000);
+      }
+    }).catch(() => {});
   };
 
   const searchCity = useCallback(async (query) => {
@@ -137,8 +179,34 @@ export default function Profile() {
 
   const handleAddMember = () => {
     if (!form.name.trim()) return;
-    setFamily([...family, { id: generateId(), name: form.name.trim(), phone: form.phone.trim(), role: form.role.trim() || "Family", username: form.username.trim() || null }]);
+    const member = { id: generateId(), name: form.name.trim(), phone: form.phone.trim(), role: form.role.trim() || "Family", username: form.username.trim() || null };
+    setFamily([...family, member]);
+    if (member.username) persistMember(member);
     resetForm();
+  };
+
+  const persistMember = (member) => {
+    fetch("/api/profiles/family", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: member.username, role: member.role }),
+    }).then((r) => r.json()).then((d) => {
+      if (d?.success && d?.data?.member) {
+        const m = d.data.member;
+        const dbId = `db-${m.family_member_id}`;
+        setFamilyState((prev) => prev.map((x) =>
+          x.id === member.id
+            ? { ...x, id: dbId, persisted: true, family_member_id: m.family_member_id, name: m.display_name || x.name, username: m.username || x.username }
+            : x
+        ));
+      } else if (d?.code === "TABLE_MISSING") {
+        setUsernameMsg("Profile database not set up — run scripts/setup-profiles.sql to link family members.");
+        setTimeout(() => setUsernameMsg(""), 4000);
+      } else if (d?.error) {
+        setUsernameMsg(d.error);
+        setTimeout(() => setUsernameMsg(""), 4000);
+      }
+    }).catch(() => {});
   };
 
   const handleUpdateMember = (id) => {
@@ -150,6 +218,10 @@ export default function Profile() {
   const handleDeleteMember = (id) => {
     setFamily(family.filter((m) => m.id !== id));
     if (editId === id) resetForm();
+    const member = family.find((m) => m.id === id);
+    if (member?.persisted && member.family_member_id) {
+      fetch(`/api/profiles/family?family_member_id=${encodeURIComponent(member.family_member_id)}`, { method: "DELETE" }).catch(() => {});
+    }
   };
 
   const startEdit = (m) => {
@@ -208,11 +280,17 @@ export default function Profile() {
   const alertMember = async (member) => {
     const mapsUrl = `https://www.google.com/maps?q=${loc.lat},${loc.lon}`;
     const msg = `🚨 EMERGENCY ALERT from ${user?.email || "family member"} on Beacon.AI\nLocation: ${mapsUrl}`;
-    if (Notification.permission === "granted") {
-      new Notification("Emergency Alert Sent", { body: `Alerting ${member.name}...` });
-    } else if (Notification.permission !== "denied") {
-      const perm = await Notification.requestPermission();
-      if (perm === "granted") new Notification("Emergency Alert Sent", { body: `Alerting ${member.name}...` });
+    if (member?.persisted && member.family_member_id) {
+      try {
+        await sendEmergencyAlert({ recipientId: member.family_member_id, recipientName: member.name, message: msg });
+        setAlertMsg(`Emergency alert sent to ${member.name}`);
+        setTimeout(() => setAlertMsg(""), 5000);
+        return;
+      } catch {
+        setAlertMsg("Could not send alert");
+        setTimeout(() => setAlertMsg(""), 5000);
+        return;
+      }
     }
     try { await navigator.clipboard.writeText(msg); setAlertMsg(`Alert prepared for ${member.name}`); }
     catch { setAlertMsg(`Alert ready for ${member.name}`); }

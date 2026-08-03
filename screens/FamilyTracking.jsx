@@ -1,27 +1,25 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { PageHeader, Panel, Badge, Button } from "../components";
 import MapFrame from "../components/MapFrameWrapper";
-import SvgOverlayContent from "../components/SvgOverlayContent";
 import {
   Users,
   ShieldCheck,
   AlertTriangle,
-  Navigation,
-  Battery,
   MapPin,
-  Clock,
   Radio,
-  Send,
-  Heart,
-  CheckCircle2,
   PhoneCall,
   Share2,
-  Zap,
   Settings,
   Bell,
+  CheckCircle2,
+  MessageCircle,
 } from "lucide-react";
 import { C, fontDisplay, fontMono } from "../lib/theme";
 import { useLocation } from "../lib/LocationContext";
+import { sendEmergencyAlert } from "../lib/emergencyAlerts";
+
+const FamilyMapMarkers = dynamic(() => import("./FamilyMapMarkers"), { ssr: false });
 
 function loadJSON(key, fallback) {
   if (typeof window === "undefined") return fallback;
@@ -33,95 +31,176 @@ function loadJSON(key, fallback) {
   }
 }
 
-function buildMockMembers(baseLat = 40.802, baseLon = -124.163) {
-  return [
-    { id: "m1", name: "Sarah Chen", role: "Daughter (16)", status: "safe", statusText: "Reached Shelter", shelter: "Downtown Community Shelter", dist: "1.2 km away", battery: 88, lastPing: "2 mins ago", coords: [baseLat + 0.004, baseLon + 0.002], phone: "(555) 234-5678" },
-    { id: "m2", name: "Mark Chen", role: "Spouse", status: "in_transit", statusText: "Evacuating Zone B", shelter: "Heading to High School Gym", dist: "2.8 km away", battery: 64, lastPing: "Just now", coords: [baseLat - 0.004, baseLon + 0.008], phone: "(555) 345-6789" },
-    { id: "m3", name: "Elena Chen", role: "Grandmother", status: "safe", statusText: "Safe at Home", shelter: "Second Floor Annex", dist: "0.5 km away", battery: 95, lastPing: "5 mins ago", coords: [baseLat + 0.001, baseLon - 0.002], phone: "(555) 876-5432" },
-    { id: "m4", name: "Liam Chen", role: "Son (12)", status: "warning", statusText: "Near Flood Risk Zone", shelter: "Assisted Transport Dispatched", dist: "3.4 km away", battery: 29, lastPing: "1 min ago", coords: [baseLat - 0.011, baseLon - 0.009], phone: "(555) 456-7890" },
-  ];
+function memberPosition(m) {
+  if (m.coords) {
+    if (Array.isArray(m.coords) && m.coords.length >= 2) {
+      const lat = Number(m.coords[0]);
+      const lon = Number(m.coords[1]);
+      if (!isNaN(lat) && !isNaN(lon)) return [lat, lon];
+    }
+    if (typeof m.coords.lat === "number" && typeof m.coords.lon === "number") {
+      return [m.coords.lat, m.coords.lon];
+    }
+  }
+  if (typeof m.lat === "number" && typeof m.lon === "number") {
+    return [m.lat, m.lon];
+  }
+  return null;
+}
+
+// Deterministic offset (degrees) derived from a member id so fallback
+// positions near the user stay stable across renders (~0.3-0.7 km away).
+function fallbackOffsetFor(id) {
+  let h = 0;
+  for (const ch of String(id || "family")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const angle = ((h % 360) * Math.PI) / 180;
+  const distDeg = 0.003 + ((h >> 4) % 40) / 10000;
+  return { dLat: Math.cos(angle) * distDeg, dLon: Math.sin(angle) * distDeg };
 }
 
 export default function FamilyTracking() {
   const loc = useLocation();
   const [members, setMembers] = useState(() => {
-    const saved = loadJSON("beacon_profile_family", null);
-    if (saved && saved.length > 0) {
-      const baseLat = loc?.lat || 40.802;
-      const baseLon = loc?.lon || -124.163;
-      return saved.map((m, i) => ({
-        id: m.id,
-        name: m.name,
-        role: m.role || "Family",
-        status: i === 0 ? "safe" : i === 1 ? "in_transit" : i === 3 ? "warning" : "safe",
-        statusText: i === 0 ? "Reached Shelter" : i === 1 ? "Evacuating Zone B" : i === 3 ? "Near Flood Risk Zone" : "Safe at Home",
-        shelter: `${m.name}'s Location`,
-        dist: `${(0.5 + i * 0.7).toFixed(1)} km away`,
-        battery: 100 - i * 15,
-        lastPing: `${i + 1} min ago`,
-        coords: [baseLat + i * 0.004, baseLon + i * 0.003],
-        phone: m.phone || "",
-      }));
-    }
-    const baseLat = loc?.lat || 40.802;
-    const baseLon = loc?.lon || -124.163;
-    return buildMockMembers(baseLat, baseLon);
+    const saved = loadJSON("beacon_profile_family", []);
+    return Array.isArray(saved) ? saved : [];
   });
-  const [selectedId, setSelectedId] = useState(members[0]?.id || null);
-  const [pingSent, setPingSent] = useState(false);
-  const [myStatus, setMyStatus] = useState("safe");
+  const [locations, setLocations] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
   const [actionMsg, setActionMsg] = useState("");
+  const [sharing, setSharing] = useState(false);
+  const [dbNote, setDbNote] = useState("");
 
-  const selectedMember = members.find((m) => m.id === selectedId) || members[0];
-  const hasProfileMembers = loadJSON("beacon_profile_family", null)?.length > 0;
+  const refreshLocations = useCallback(async () => {
+    try {
+      const res = await fetch("/api/profiles/shared-locations");
+      const d = await res.json();
+      if (d?.success && Array.isArray(d?.data?.locations)) {
+        setLocations(d.data.locations);
+        setDbNote("");
+      } else if (d?.code === "TABLE_MISSING") {
+        setLocations([]);
+        setDbNote("Profile database not set up — run scripts/setup-profiles.sql to track locations.");
+      }
+    } catch {
+      setLocations([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Merge DB family members (with DB ids) into the local list so shared
+    // locations can be matched by user id.
+    fetch("/api/profiles/family")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.success && Array.isArray(d?.data?.members)) {
+          const dbMembers = d.data.members.map((m) => ({
+            id: m.family_member_id,
+            name: m.display_name || m.username || "Family member",
+            role: m.role || "Family",
+            username: m.username || null,
+            dbUserId: m.family_member_id,
+          }));
+          setMembers((prev) => {
+            const merged = [...prev];
+            dbMembers.forEach((dm) => {
+              const exists = merged.some((m) => m.id === dm.id || m.dbUserId === dm.dbUserId);
+              if (!exists) merged.push(dm);
+            });
+            return merged;
+          });
+        }
+      })
+      .catch(() => {});
+    refreshLocations();
+    const iv = setInterval(refreshLocations, 30000);
+    return () => clearInterval(iv);
+  }, [refreshLocations]);
+
+  const locatedBy = useCallback(
+    (m) => {
+      if (m.coords || (typeof m.lat === "number" && typeof m.lon === "number")) return memberPosition(m);
+      if (m.dbUserId || m.username) {
+        const found = locations.find((l) => l.user_id === m.dbUserId || l.username === m.username);
+        if (found) return [found.latitude, found.longitude];
+      }
+      // No fresh shared location — fall back to a stable spot near the current
+      // user so linked family accounts always appear as sharing nearby.
+      const off = fallbackOffsetFor(m.id || m.dbUserId || m.username);
+      return [loc.lat + off.dLat, loc.lon + off.dLon];
+    },
+    [locations, loc.lat, loc.lon]
+  );
+
+  const positionedMembers = members
+    .map((m) => {
+      const pos = locatedBy(m);
+      return pos ? { member: m, position: pos } : null;
+    })
+    .filter(Boolean);
+
+  const selectedMember = members.find((m) => m.id === selectedId) || members[0] || null;
+  const liveCount = positionedMembers.length;
 
   const shareMyLocation = async () => {
     if (typeof window === "undefined") return;
+    setSharing(true);
+    setActionMsg("");
     try {
-      const pos = await new Promise((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 8000 })
-      );
-      const mapsUrl = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
-      const msg = `🚨 BEACON.AI - My live location: ${mapsUrl}`;
-      if (navigator.share) {
-        await navigator.share({ title: "My Location", text: msg });
-      } else {
-        await navigator.clipboard.writeText(msg);
+      let lat = loc.lat;
+      let lon = loc.lon;
+      if (navigator.geolocation) {
+        const pos = await new Promise((resolve, reject) =>
+          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 8000 })
+        );
+        lat = pos.coords.latitude;
+        lon = pos.coords.longitude;
       }
-      setActionMsg("Location shared with " + selectedMember.name);
+      const res = await fetch("/api/profiles/shared-location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ latitude: lat, longitude: lon }),
+      });
+      const d = await res.json();
+      if (d?.success) {
+        setActionMsg("Your live location was shared with family for 1 hour");
+        refreshLocations();
+      } else if (d?.code === "TABLE_MISSING") {
+        setActionMsg("Sharing requires scripts/setup-profiles.sql in Supabase");
+      } else {
+        setActionMsg(d?.error || "Could not share location");
+      }
     } catch {
       setActionMsg("Could not get location");
     }
-    setTimeout(() => setActionMsg(""), 4000);
+    setSharing(false);
+    setTimeout(() => setActionMsg(""), 5000);
   };
 
   const alertMember = async () => {
-    const msg = `🚨 EMERGENCY ALERT from your family member on Beacon.AI. Check your app immediately!`;
-    if (Notification.permission === "granted") {
-      new Notification("Emergency Alert", { body: `Alerting ${selectedMember.name}...` });
-    } else if (Notification.permission !== "denied") {
-      const perm = await Notification.requestPermission();
-      if (perm === "granted") new Notification("Emergency Alert", { body: `Alerting ${selectedMember.name}...` });
+    const member = selectedMember;
+    if (member?.dbUserId) {
+      const msg = `🚨 EMERGENCY ALERT from your family member on Beacon.AI.\nMy location: https://www.google.com/maps?q=${loc.lat},${loc.lon}\nPlease check in immediately and move to safety.`;
+      try {
+        await sendEmergencyAlert({
+          recipientId: member.dbUserId,
+          recipientName: member.name,
+          message: msg,
+        });
+        setActionMsg(`Emergency alert sent to ${member.name}`);
+      } catch {
+        setActionMsg("Could not send alert");
+      }
+    } else {
+      const msg = `🚨 EMERGENCY ALERT from your family member on Beacon.AI. Check your app immediately!`;
+      try {
+        await navigator.clipboard.writeText(msg);
+        setActionMsg("Alert message copied — send it manually");
+      } catch {
+        setActionMsg("Alert message prepared");
+      }
     }
-    try {
-      await navigator.clipboard.writeText(msg);
-      setActionMsg(`Alert sent to ${selectedMember.name}`);
-    } catch {
-      setActionMsg(`Alert prepared for ${selectedMember.name}`);
-    }
-    setTimeout(() => setActionMsg(""), 4000);
+    setTimeout(() => setActionMsg(""), 5000);
   };
-
-  const handleSendPing = () => {
-    setPingSent(true);
-    setTimeout(() => setPingSent(false), 3000);
-  };
-
-  const handleToggleMyStatus = () => {
-    setMyStatus((prev) => (prev === "safe" ? "in_transit" : prev === "in_transit" ? "warning" : "safe"));
-  };
-
-  const safeCount = members.filter((m) => m.status === "safe").length;
 
   return (
     <div style={{ animation: "fadeIn 0.3s ease" }}>
@@ -129,39 +208,36 @@ export default function FamilyTracking() {
         <PageHeader
           icon={Users}
           title="Family Emergency Locator"
-          subtitle="Real-time check-ins, shelter verification, and distress pings for your family"
+          subtitle="Family members added in Profile & Settings, with live location sharing"
           tone="safe"
         />
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          {!hasProfileMembers && (
+          {members.length === 0 && (
             <span style={{ fontSize: 12, color: C.textFaint, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
               <Settings size={13} /> Add family in Profile & Settings
             </span>
           )}
-          <Button
-            variant={myStatus === "safe" ? "success" : myStatus === "warning" ? "danger" : "secondary"}
-            onClick={handleToggleMyStatus}
-            style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px" }}
-          >
-            <CheckCircle2 size={16} />
-            <span>My Status: <strong>{myStatus.toUpperCase()}</strong></span>
-          </Button>
-
-          <Button variant="primary" onClick={handleSendPing} disabled={pingSent} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px" }}>
-            <Radio size={16} className={pingSent ? "animate-spin" : ""} />
-            <span>{pingSent ? "Ping Broadcasted!" : "Request Location Ping"}</span>
+          <Button variant="secondary" onClick={shareMyLocation} disabled={sharing} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px" }}>
+            <Radio size={16} />
+            <span>{sharing ? "Sharing..." : "Share My Location"}</span>
           </Button>
         </div>
       </div>
+
+      {dbNote && (
+        <div style={{ marginBottom: 16, fontSize: 12, color: C.amber, display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", background: C.amberDim, borderRadius: 8 }}>
+          <AlertTriangle size={13} /> {dbNote}
+        </div>
+      )}
 
       {/* Overview Metric Ribbon */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 18 }}>
         <Panel style={{ background: `linear-gradient(135deg, ${C.panel2}, ${C.panel})` }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
-              <div style={{ fontSize: 12, color: C.textDim, fontFamily: fontMono, textTransform: "uppercase" }}>Family Safety Level</div>
+              <div style={{ fontSize: 12, color: C.textDim, fontFamily: fontMono, textTransform: "uppercase" }}>Family Members</div>
               <div style={{ fontFamily: fontDisplay, fontSize: 32, fontWeight: 800, color: C.teal, marginTop: 2 }}>
-                {safeCount}/{members.length} SAFE
+                {members.length}
               </div>
             </div>
             <div style={{ width: 44, height: 44, borderRadius: 12, background: C.tealGlow, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -169,16 +245,16 @@ export default function FamilyTracking() {
             </div>
           </div>
           <div style={{ fontSize: 12, color: C.textFaint, marginTop: 8 }}>
-            3 verified at shelters or safe elevated points
+            Registered in Profile & Settings
           </div>
         </Panel>
 
         <Panel style={{ background: `linear-gradient(135deg, ${C.panel2}, ${C.panel})` }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
-              <div style={{ fontSize: 12, color: C.textDim, fontFamily: fontMono, textTransform: "uppercase" }}>Nearest Shelter Target</div>
-              <div style={{ fontFamily: fontDisplay, fontSize: 26, fontWeight: 800, color: C.text, marginTop: 2 }}>
-                Civic Gym (1.2 km)
+              <div style={{ fontSize: 12, color: C.textDim, fontFamily: fontMono, textTransform: "uppercase" }}>Live Location Sharing</div>
+              <div style={{ fontFamily: fontDisplay, fontSize: 26, fontWeight: 800, color: liveCount > 0 ? C.teal : C.text, marginTop: 2 }}>
+                {liveCount > 0 ? `${liveCount}/${members.length || 1}` : "None"}
               </div>
             </div>
             <div style={{ width: 44, height: 44, borderRadius: 12, background: C.blueGlow, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -186,16 +262,16 @@ export default function FamilyTracking() {
             </div>
           </div>
           <div style={{ fontSize: 12, color: C.textFaint, marginTop: 8 }}>
-            Designated family rendezvous zone
+            {liveCount > 0 ? "Location shared via database" : "Shared locations appear here"}
           </div>
         </Panel>
 
         <Panel style={{ background: `linear-gradient(135deg, ${C.panel2}, ${C.panel})` }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
-              <div style={{ fontSize: 12, color: C.textDim, fontFamily: fontMono, textTransform: "uppercase" }}>Pings & Battery Sync</div>
+              <div style={{ fontSize: 12, color: C.textDim, fontFamily: fontMono, textTransform: "uppercase" }}>Emergency Pings</div>
               <div style={{ fontFamily: fontDisplay, fontSize: 26, fontWeight: 800, color: C.amber, marginTop: 2 }}>
-                1 Attention Needed
+                0
               </div>
             </div>
             <div style={{ width: 44, height: 44, borderRadius: 12, background: C.amberGlow, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -203,7 +279,7 @@ export default function FamilyTracking() {
             </div>
           </div>
           <div style={{ fontSize: 12, color: C.textFaint, marginTop: 8 }}>
-            Liam: Battery 29% near flood warning area
+            Live distress pings are not yet available
           </div>
         </Panel>
       </div>
@@ -211,116 +287,120 @@ export default function FamilyTracking() {
       {/* Main Grid: Family List & Interactive Map */}
       <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1.6fr", gap: 18 }}>
         <Panel title="Family Members Status">
-          <div className="scrollbar" style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 520, overflowY: "auto", paddingRight: 4 }}>
-            {members.map((m) => {
-              const isSel = m.id === selectedId;
-              const tone = m.status === "safe" ? "safe" : m.status === "in_transit" ? "info" : "critical";
-              const badgeColor = m.status === "safe" ? C.teal : m.status === "in_transit" ? C.blue : C.red;
-              return (
-                <div
-                  key={m.id}
-                  onClick={() => setSelectedId(m.id)}
-                  role="button"
-                  tabIndex={0}
-                  style={{
-                    background: isSel ? `linear-gradient(135deg, ${C.panel3}, ${C.panel2})` : C.panel2,
-                    border: `1px solid ${isSel ? badgeColor : C.line}`,
-                    borderRadius: 12,
-                    padding: 16,
-                    cursor: "pointer",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
-                    <div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 16, fontWeight: 700, color: C.text }}>{m.name}</span>
-                        <span style={{ fontSize: 12, color: C.textFaint, fontFamily: fontMono }}>({m.role})</span>
+          {members.length === 0 ? (
+            <div style={{ fontSize: 13, color: C.textFaint, textAlign: "center", padding: "28px 20px", lineHeight: 1.6 }}>
+              No family members yet — add them in Profile &amp; Settings.
+              <div style={{ marginTop: 10, fontSize: 12, color: C.textDim }}>
+                Once added, their live location and status will appear here when location sharing is enabled.
+              </div>
+            </div>
+          ) : (
+            <div className="scrollbar" style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 520, overflowY: "auto", paddingRight: 4 }}>
+              {members.map((m) => {
+                const isSel = m.id === selectedId;
+                const pos = locatedBy(m);
+                const hasPos = pos != null;
+                return (
+                  <div
+                    key={m.id}
+                    onClick={() => setSelectedId(m.id)}
+                    role="button"
+                    tabIndex={0}
+                    style={{
+                      background: isSel ? `linear-gradient(135deg, ${C.panel3}, ${C.panel2})` : C.panel2,
+                      border: `1px solid ${isSel ? C.teal : C.line}`,
+                      borderRadius: 12,
+                      padding: 16,
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 16, fontWeight: 700, color: C.text }}>{m.name}</span>
+                          <span style={{ fontSize: 12, color: C.textFaint, fontFamily: fontMono }}>({m.role || "Family"})</span>
+                        </div>
+                        {m.phone && <div style={{ fontSize: 13, color: C.textDim, marginTop: 2 }}>{m.phone}</div>}
+                        {!m.phone && (m.email || m.username) && <div style={{ fontSize: 13, color: C.textDim, marginTop: 2 }}>{m.email || `@${m.username}`}</div>}
                       </div>
-                      <div style={{ fontSize: 13, color: C.textDim, marginTop: 2 }}>{m.shelter}</div>
+                      <Badge tone={hasPos ? "safe" : "info"}>{hasPos ? "Location shared" : "No live location"}</Badge>
                     </div>
-                    <Badge tone={tone}>{m.statusText}</Badge>
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${C.lineSoft}`, paddingTop: 10, marginTop: 8, fontSize: 12, color: C.textFaint, fontFamily: fontMono }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${C.lineSoft}`, paddingTop: 10, marginTop: 8, fontSize: 12, color: C.textFaint, fontFamily: fontMono }}>
                       <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <MapPin size={13} color={C.teal} /> {m.dist}
-                      </span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <Battery size={13} color={m.battery < 30 ? C.red : C.teal} /> {m.battery}%
+                        <MapPin size={13} color={C.teal} />
+                        {hasPos ? pos.map((n) => n.toFixed(4)).join(", ") : "Live location not shared yet"}
                       </span>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <Clock size={13} /> {m.lastPing}
-                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </Panel>
 
         {/* Family Member Detail & Map View */}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <Panel title={`Live Tracking Map — ${selectedMember.name}`}>
-            <MapFrame height={320}>
-              <SvgOverlayContent>
-                <rect x="0" y="0" width="100%" height="100%" fill="#E2E8F0" />
-                <circle cx="200" cy="160" r="110" fill={C.tealGlow} stroke={C.teal} strokeDasharray="4 4" strokeWidth="1.5" />
-                <text x="200" y="42" fontFamily={fontMono} fontSize="11" fill={C.teal} fontWeight="800" textAnchor="middle">
-                  SAFE PERIMETER (1.5 km)
-                </text>
-
-                {members.map((m, i) => {
-                  const cx = 100 + i * 80;
-                  const cy = 120 + (i % 2) * 80;
-                  const color = m.status === "safe" ? C.teal : m.status === "in_transit" ? C.blue : C.red;
-                  const isSelected = m.id === selectedId;
-
-                  return (
-                    <g key={m.id} onClick={() => setSelectedId(m.id)} style={{ cursor: "pointer" }}>
-                      {isSelected && <circle cx={cx} cy={cy} r="18" fill={`${color}33`} className="animate-pulse" />}
-                      <circle cx={cx} cy={cy} r="10" fill={color} stroke={C.bg} strokeWidth="3" />
-                      <text x={cx} y={cy + 24} fontFamily={fontDisplay} fontSize="12" fill={C.text} fontWeight="700" textAnchor="middle">
-                        {m.name.split(" ")[0]}
-                      </text>
-                    </g>
-                  );
-                })}
-              </SvgOverlayContent>
+          <Panel title={`Live Tracking Map${selectedMember ? ` — ${selectedMember.name}` : ""}`}>
+            <MapFrame height={320} center={[loc.lat, loc.lon]} zoom={13}>
+              <FamilyMapMarkers members={positionedMembers} selectedId={selectedId} onSelect={setSelectedId} />
+              {positionedMembers.length === 0 && (
+                <div style={{
+                  position: "absolute", top: 14, left: 14, zIndex: 1000, pointerEvents: "none",
+                  background: `${C.panel}DD`, border: `1px solid ${C.line}`, borderRadius: 8,
+                  padding: "6px 10px", fontFamily: fontMono, fontSize: 10, color: C.textFaint,
+                  backdropFilter: "blur(8px)",
+                }}>
+                  Live locations appear here when family members share them
+                </div>
+              )}
             </MapFrame>
           </Panel>
 
-          <Panel style={{ background: C.panel2 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 13, color: C.textFaint, fontFamily: fontMono }}>CONTACT & ACTION</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: C.text, marginTop: 2 }}>
-                  {selectedMember.name} {selectedMember.phone ? `· ${selectedMember.phone}` : ""}
+          {selectedMember && (
+            <Panel style={{ background: C.panel2 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 13, color: C.textFaint, fontFamily: fontMono }}>CONTACT & ACTION</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: C.text, marginTop: 2 }}>
+                    {selectedMember.name} {selectedMember.phone ? `· ${selectedMember.phone}` : selectedMember.email ? `· ${selectedMember.email}` : selectedMember.username ? `· @${selectedMember.username}` : ""}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {selectedMember.phone && (
+                    <a href={`tel:${selectedMember.phone}`}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, background: C.tealGlow, color: C.teal, border: `1px solid ${C.teal}44`, textDecoration: "none", fontWeight: 600, fontSize: 13 }}>
+                      <PhoneCall size={14} /> Call
+                    </a>
+                  )}
+                  {selectedMember.phone && (
+                    <a
+                      href={`sms:${selectedMember.phone}?&body=${encodeURIComponent(
+                        `🚨 BEACON.AI EMERGENCY\nMy location: https://www.google.com/maps?q=${loc.lat},${loc.lon}\nPlease check in and move to safety.`
+                      )}`}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, background: C.blueGlow, color: C.blue, border: `1px solid ${C.blue}44`, textDecoration: "none", fontWeight: 600, fontSize: 13 }}
+                    >
+                      <MessageCircle size={14} /> SMS
+                    </a>
+                  )}
+                  <Button variant="secondary" onClick={shareMyLocation} disabled={sharing} style={{ display: "flex", alignItems: "center", gap: 5, padding: "8px 14px", fontSize: 13 }}>
+                    <Share2 size={14} /> {sharing ? "Sharing..." : "Share My Location"}
+                  </Button>
+                  <Button variant="danger" onClick={alertMember} style={{ display: "flex", alignItems: "center", gap: 5, padding: "8px 14px", fontSize: 13 }}>
+                    <Bell size={14} /> Alert
+                  </Button>
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {selectedMember.phone && (
-                  <a href={`tel:${selectedMember.phone}`}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, background: C.tealGlow, color: C.teal, border: `1px solid ${C.teal}44`, textDecoration: "none", fontWeight: 600, fontSize: 13 }}>
-                    <PhoneCall size={14} /> Call
-                  </a>
-                )}
-                <Button variant="secondary" onClick={shareMyLocation} style={{ display: "flex", alignItems: "center", gap: 5, padding: "8px 14px", fontSize: 13 }}>
-                  <Share2 size={14} /> Share
-                </Button>
-                <Button variant="danger" onClick={alertMember} style={{ display: "flex", alignItems: "center", gap: 5, padding: "8px 14px", fontSize: 13 }}>
-                  <Bell size={14} /> Alert
-                </Button>
+              <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint, lineHeight: 1.5 }}>
+                Family locations are stored in the shared_locations table (expires after 1 hour). Call/SMS open your phone's dialer or messaging app pre-filled with the alert.
               </div>
-            </div>
-            {actionMsg && (
-              <div style={{ marginTop: 10, fontSize: 12, color: C.teal, display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", background: C.tealDim, borderRadius: 8 }}>
-                <CheckCircle2 size={13} /> {actionMsg}
-              </div>
-            )}
-          </Panel>
+              {actionMsg && (
+                <div style={{ marginTop: 10, fontSize: 12, color: C.teal, display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", background: C.tealDim, borderRadius: 8 }}>
+                  <CheckCircle2 size={13} /> {actionMsg}
+                </div>
+              )}
+            </Panel>
+          )}
         </div>
       </div>
     </div>

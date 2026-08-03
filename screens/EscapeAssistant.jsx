@@ -4,12 +4,13 @@ import { PageHeader, Panel, Button, Badge } from "../components";
 import MapFrame from "../components/MapFrameWrapper";
 import {
   Navigation, MapPin, CloudRain, Wind, Droplets, Shield, ChevronRight,
-  Route, X, AlertTriangle, Sparkles, CheckCircle2, ArrowRight, Zap, RefreshCw, Flame, Waves, Activity
+  Route, X, AlertTriangle, ShieldCheck,
 } from "lucide-react";
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
-import firmsService from "../lib/services/firmsService";
+import shelterService from "../lib/services/shelterService";
 import { validateAndFilterShelters } from "../lib/haversine";
+import { useShelters, useWeatherNow, useWeatherAlerts, useHotspots } from "../lib/swr";
 import { useLocation } from "../lib/LocationContext";
 
 const EscapeMapContent = dynamic(() => import("./EscapeMapContent"), { ssr: false });
@@ -21,80 +22,41 @@ function formatDuration(min) {
   return m > 0 ? `${h}h ${m}min` : `${h}h`;
 }
 
-const SCENARIOS = {
-  flood: {
-    id: "flood",
-    icon: Waves,
-    tone: "critical",
-    title: "Heavy Rain & Rapid Flood Risk",
-    alertMessage: "Heavy rain begins. Flood expected near your primary route in 30 minutes.",
-    recommendation: "Alternative safe route calculated via elevated ridge line. Direct to nearest open shelter.",
-    hazardNotice: "Main Street Bridge under water risk in 30 mins",
-  },
-  quake: {
-    id: "quake",
-    icon: Activity,
-    tone: "warning",
-    title: "Seismic Foreshock & Road Debris",
-    alertMessage: "Magnitude 5.8 tremor detected 4 km away. Overpass structural inspection in progress.",
-    recommendation: "Bypassing elevated overpasses. Routing through open parkway route.",
-    hazardNotice: "Avoid 4th Ave Overpass & Brick Wall Corridors",
-  },
-  fire: {
-    id: "fire",
-    icon: Flame,
-    tone: "critical",
-    title: "Wildfire Smoke & Evacuation Notice",
-    alertMessage: "Wind shift pushing dense smoke south toward Highway 101.",
-    recommendation: "North evacuation corridor active. Clear air index along Highway 299.",
-    hazardNotice: "Highway 101 South closed due to zero visibility",
-  },
-};
+const ALERT_SEVERITY_RANK = { Extreme: 4, Severe: 3, Moderate: 2, Minor: 1, Unknown: 0 };
 
 export default function EscapeAssistant() {
   const loc = useLocation();
-  const [shelters, setShelters] = useState([]);
-  const [hotspots, setHotspots] = useState([]);
   const [selectedShelter, setSelectedShelter] = useState(null);
-  const [weather, setWeather] = useState(null);
-  const [weatherError, setWeatherError] = useState(null);
-  const [shelterError, setShelterError] = useState(null);
   const [userLocation, setUserLocation] = useState([loc.lat, loc.lon]);
   const [routeData, setRouteData] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState(null);
-  const [activeScenario, setActiveScenario] = useState("flood");
-  const [appliedAlternative, setAppliedAlternative] = useState(false);
   const popupRefs = useRef({});
 
-  const scenario = SCENARIOS[activeScenario];
-
-  const fetchLocationData = useCallback((lat, lon) => {
-    api.shelters.list(lat, lon).then((res) => {
-      if (res?.success && res.data?.shelters) {
-        const { verifiedShelters } = validateAndFilterShelters(res.data.shelters, lat, lon, 10);
-        setShelters(verifiedShelters);
-        setSelectedShelter(verifiedShelters[0] || null);
-      } else {
-        setShelterError(res?.error || "Failed to load shelters");
-      }
-    }).catch((err) => setShelterError(err.message));
-
-    api.weather.now(lat, lon).then((res) => {
-      if (res?.success && res.data) setWeather(res.data);
-      else setWeatherError(res?.error || "Unavailable");
-    }).catch((err) => setWeatherError(err.message));
-  }, []);
+  const radius = shelterService.getDefaultRadius();
+  const { shelters, shelterError, shelterLoading } = useShelters(loc.lat, loc.lon);
+  const { weather, weatherError } = useWeatherNow(loc.lat, loc.lon);
+  const { alerts } = useWeatherAlerts(loc.lat, loc.lon);
+  const { hotspots } = useHotspots();
 
   useEffect(() => {
-    firmsService.fetchHotspots().then((res) => {
-      if (res?.success) {
-        setHotspots(res.hotspots || []);
-      }
-    }).catch(() => {});
     setUserLocation([loc.lat, loc.lon]);
-    fetchLocationData(loc.lat, loc.lon);
-  }, [loc.lat, loc.lon, fetchLocationData]);
+  }, [loc.lat, loc.lon]);
+
+  useEffect(() => {
+    setSelectedShelter((prev) => (prev && shelters.some((s) => s.id === prev.id)) ? prev : (shelters[0] || null));
+  }, [shelters]);
+
+  const verifiedShelters = React.useMemo(
+    () => validateAndFilterShelters(shelters, loc.lat, loc.lon, radius).verifiedShelters,
+    [shelters, loc.lat, loc.lon, radius]
+  );
+
+  const topAlert = alerts.length > 0
+    ? [...alerts].sort((a, b) => (ALERT_SEVERITY_RANK[b.severity] || 0) - (ALERT_SEVERITY_RANK[a.severity] || 0))[0]
+    : null;
+  const alertTone = topAlert && (ALERT_SEVERITY_RANK[topAlert.severity] || 0) >= 3 ? "critical" : "warning";
+  const alertColor = alertTone === "critical" ? C.red : C.amber;
 
   const getLocation = useCallback(() => Promise.resolve([loc.lat, loc.lon]), [loc.lat, loc.lon]);
 
@@ -115,8 +77,8 @@ export default function EscapeAssistant() {
       const originStr = `${origin[1]},${origin[0]}`;
       const destStr = `${selectedShelter.lon},${selectedShelter.lat}`;
       const res = await api.route.fetch(originStr, destStr, "walking");
-      if (res?.success && res.data) {
-        setRouteData(res.data);
+      if (res?.success && res.data?.routes?.length) {
+        setRouteData(res.data.routes[0]);
       } else {
         setRouteError(res?.error || "Routing failed");
       }
@@ -126,15 +88,9 @@ export default function EscapeAssistant() {
     setRouteLoading(false);
   }, [selectedShelter, getLocation]);
 
-  const handleApplyAlternative = () => {
-    setAppliedAlternative(true);
-    handleNavigate();
-  };
-
   const clearRoute = useCallback(() => {
     setRouteData(null);
     setRouteError(null);
-    setAppliedAlternative(false);
   }, []);
 
   const routeGeojson = routeData ? {
@@ -161,89 +117,74 @@ export default function EscapeAssistant() {
     dashArray: null,
   });
 
-  const sorted = [...shelters];
+  const sorted = verifiedShelters;
 
   return (
     <div style={{ animation: "fadeIn 0.3s ease" }}>
       {/* Page Header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
         <PageHeader icon={Navigation} title="Disaster Escape Assistant" subtitle="Real-time hazard detection, proactive rerouting, and safe shelter navigation" tone="critical" />
-        
-        {/* Disaster Scenario Switcher */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.panel2, padding: "6px 10px", borderRadius: 10, border: `1px solid ${C.line}` }}>
-          <span style={{ fontSize: 11, fontFamily: fontMono, color: C.textFaint, textTransform: "uppercase" }}>Test Scenario:</span>
-          {Object.keys(SCENARIOS).map((key) => {
-            const sc = SCENARIOS[key];
-            const Icon = sc.icon;
-            const isAct = activeScenario === key;
-            return (
-              <button
-                key={key}
-                onClick={() => { setActiveScenario(key); setAppliedAlternative(false); }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "6px 10px",
-                  borderRadius: 6,
-                  background: isAct ? C.red : "transparent",
-                  color: isAct ? "#fff" : C.textDim,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  transition: "all 0.15s ease",
-                }}
-              >
-                <Icon size={14} />
-                <span style={{ textTransform: "capitalize" }}>{key}</span>
-              </button>
-            );
-          })}
-        </div>
       </div>
 
-      {/* Proactive AI Alert Card (High Impact) */}
-      <div style={{
-        background: `linear-gradient(135deg, ${C.redDim}, ${C.panel2})`,
-        border: `1.5px solid ${C.red}`,
-        borderRadius: 14,
-        padding: "18px 22px",
-        marginBottom: 18,
-        boxShadow: S.glow(C.red),
-        animation: "slideIn 0.3s ease",
-      }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-            <div style={{ width: 44, height: 44, borderRadius: 12, background: `${C.red}33`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <AlertTriangle size={24} color={C.red} />
-            </div>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontFamily: fontMono, fontSize: 12, color: C.red, textTransform: "uppercase", fontWeight: 800 }}>PROACTIVE EMERGENCY ALERT</span>
-                <Badge tone="critical">AUTOMATIC HAZARD DETECTION</Badge>
+      {/* Live NWS Alert Card */}
+      {topAlert ? (
+        <div style={{
+          background: `linear-gradient(135deg, ${alertColor === C.red ? C.redDim : C.amberDim}, ${C.panel2})`,
+          border: `1.5px solid ${alertColor}`,
+          borderRadius: 14,
+          padding: "18px 22px",
+          marginBottom: 18,
+          boxShadow: S.glow(alertColor),
+          animation: "slideIn 0.3s ease",
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: `${alertColor}33`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <AlertTriangle size={24} color={alertColor} />
               </div>
-              <div style={{ fontSize: 17, color: C.text, fontWeight: 800, marginTop: 4, lineHeight: 1.3 }}>
-                {scenario.alertMessage}
-              </div>
-              <div style={{ fontSize: 14, color: C.textDim, marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ color: C.teal, fontWeight: 700 }}>✓ {scenario.recommendation}</span>
-                <span style={{ color: C.textFaint }}>&middot;</span>
-                <span style={{ color: C.amber, fontWeight: 600 }}>Nearest shelter: {sorted.length > 0 ? `${sorted[0].name} (${sorted[0].dist})` : "Loading..."}</span>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontFamily: fontMono, fontSize: 12, color: alertColor, textTransform: "uppercase", fontWeight: 800 }}>
+                    {alertTone === "critical" ? "ACTIVE EMERGENCY ALERT" : "ACTIVE WEATHER ALERT"}
+                  </span>
+                  <Badge tone={alertTone}>{topAlert.severity || "ACTIVE"}</Badge>
+                </div>
+                <div style={{ fontSize: 17, color: C.text, fontWeight: 800, marginTop: 4, lineHeight: 1.3 }}>
+                  {topAlert.headline || topAlert.type || "Weather alert"}
+                </div>
+                <div style={{ fontSize: 14, color: C.textDim, marginTop: 6, lineHeight: 1.5 }}>
+                  {topAlert.description || topAlert.areaDesc || ""}
+                </div>
+                <div style={{ fontSize: 12, color: C.textFaint, marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ color: C.textDim, fontWeight: 600 }}>Nearest shelter: {sorted.length > 0 ? `${sorted[0].name} (${sorted[0].dist})` : "Loading..."}</span>
+                </div>
               </div>
             </div>
           </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 10, alignSelf: "center" }}>
-            <Button
-              variant={appliedAlternative ? "success" : "danger"}
-              onClick={handleApplyAlternative}
-              style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 20px", fontWeight: 800, fontSize: 14 }}
-            >
-              <Sparkles size={16} />
-              {appliedAlternative ? "Safe Route Active" : "Switch to Alternative Route"}
-            </Button>
+        </div>
+      ) : (
+        <div style={{
+          background: C.tealDim,
+          border: `1.5px solid ${C.teal}66`,
+          borderRadius: 14,
+          padding: "16px 20px",
+          marginBottom: 18,
+          animation: "slideIn 0.3s ease",
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+        }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: `${C.teal}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <ShieldCheck size={24} color={C.teal} />
+          </div>
+          <div>
+            <div style={{ fontFamily: fontMono, fontSize: 12, color: C.teal, textTransform: "uppercase", fontWeight: 800 }}>NO ACTIVE ALERTS</div>
+            <div style={{ fontSize: 15, color: C.text, fontWeight: 700, marginTop: 4 }}>
+              No active NWS alerts for your area
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Main Interactive Map & Details Grid */}
       <div style={{ display: "grid", gridTemplateColumns: "1.7fr 1fr", gap: 18 }}>
@@ -316,7 +257,13 @@ export default function EscapeAssistant() {
 
           <Panel title="Nearby Emergency Shelters" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
             <div className="scrollbar" style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, maxHeight: 380 }}>
-              {(shelterError && sorted.length === 0) ? (
+              {shelterLoading && sorted.length === 0 ? (
+                <div style={{ color: C.textFaint, fontSize: 13, textAlign: "center", padding: 20 }}>
+                  {userLocation
+                    ? "Locating nearby shelters..."
+                    : "Acquiring GPS location to find nearby shelters..."}
+                </div>
+              ) : (shelterError && sorted.length === 0) ? (
                 <div style={{ color: C.textFaint, fontSize: 13, textAlign: "center", padding: 20 }}>{shelterError}</div>
               ) : sorted.length === 0 ? (
                 <div style={{ color: C.textFaint, fontSize: 13, textAlign: "center", padding: 20 }}>

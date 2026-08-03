@@ -24,6 +24,7 @@ export default function Button({ variant = "primary", size = "md", children, onC
     ghost: { background: "transparent", color: C.textDim, border: "none" },
     danger: { background: C.red, color: "#FFFFFF", border: "none", boxShadow: S.sm },
     success: { background: C.teal, color: "#FFFFFF", border: "none", boxShadow: S.sm },
+    warning: { background: "#D97706", color: "#FFFFFF", border: "none", boxShadow: S.sm },
   };
 
   const v = variants[variant] || variants.primary;

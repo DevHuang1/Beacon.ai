@@ -50,6 +50,20 @@ function MapCenterUpdater({ center, zoom }) {
   return null;
 }
 
+function ResizeWatcher() {
+  const map = useMap();
+  useEffect(() => {
+    const el = map.getContainer();
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [map]);
+  return null;
+}
+
 export default function MapFrame({
   children, height = 380,
   center: propCenter,
@@ -60,7 +74,7 @@ export default function MapFrame({
   const [mapKey, setMapKey] = useState(0);
   const [mapCenter, setMapCenter] = useState(propCenter || [loc.lat, loc.lon]);
 
-  const [userPos, setUserPos] = useState(propCenter ? [loc.lat, loc.lon] : null);
+  const [userPos, setUserPos] = useState([loc.lat, loc.lon]);
   const [userAcc, setUserAcc] = useState(loc.accuracy || null);
   const [watching, setWatching] = useState(false);
   const [watchId, setWatchId] = useState(null);
@@ -71,27 +85,19 @@ export default function MapFrame({
     import("leaflet/dist/leaflet.css");
   }, []);
 
+  // Follow the shared location (saved in Profile settings, GPS, or propCenter)
+  // so changing location anywhere recenters every map on the new coordinates.
+  const effectiveCenter = propCenter || (loc.lat && loc.lon ? [loc.lat, loc.lon] : null);
   useEffect(() => {
-    if (propCenter) return;
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (p) => {
-        const pos = [p.coords.latitude, p.coords.longitude];
-        setMapCenter(pos);
-        setUserPos(pos);
-        setUserAcc(p.coords.accuracy);
-      },
-      () => {},
-      { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
-    );
-  }, []);
+    if (effectiveCenter) setMapCenter(effectiveCenter);
+  }, [effectiveCenter?.[0], effectiveCenter?.[1]]);
 
   useEffect(() => {
-    if (propCenter && loc.lat && loc.lon) {
+    if (loc.lat && loc.lon) {
       setUserPos([loc.lat, loc.lon]);
       setUserAcc(loc.accuracy || 50);
     }
-  }, [loc.lat, loc.lon, propCenter]);
+  }, [loc.lat, loc.lon]);
 
   useEffect(() => {
     return () => {
@@ -153,7 +159,8 @@ export default function MapFrame({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <TileErrorWatcher onError={() => setTileFailed(true)} />
-        <MapCenterUpdater center={propCenter} zoom={zoom} />
+        <MapCenterUpdater center={mapCenter} zoom={zoom} />
+        <ResizeWatcher />
         {geojson && <GeoJSON data={geojson} style={geoStyle || undefined} />}
         <LocationLayer position={userPos} accuracy={userAcc} />
         {children}

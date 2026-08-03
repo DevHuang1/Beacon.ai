@@ -1,8 +1,10 @@
 import React from "react";
 import { useRouter } from "next/router";
+import { SWRConfig } from "swr";
 import { GlobalStyle } from "../components";
 import { AuthProvider, useAuth } from "../components/AuthProvider";
 import { LocationProvider } from "../lib/LocationContext";
+import { swrConfig } from "../lib/swr";
 
 function AuthGuard({ children }) {
   const { user, loading } = useAuth();
@@ -40,7 +42,9 @@ export default function App({ Component, pageProps }) {
       <GlobalStyle />
       <LocationProvider>
         <AuthGuard>
-          <Component {...pageProps} />
+          <SWRConfig value={swrConfig}>
+            <Component {...pageProps} />
+          </SWRConfig>
         </AuthGuard>
       </LocationProvider>
     </AuthProvider>

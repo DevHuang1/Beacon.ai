@@ -4,3 +4,8 @@ dist
 .DS_Store
 .env.local
 .env
+
+# Credentials & caches
+accounts.txt
+__pycache__/
+*.pyc

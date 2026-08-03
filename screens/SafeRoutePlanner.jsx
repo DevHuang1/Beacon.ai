@@ -2,22 +2,30 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import MapFrame from "../components/MapFrameWrapper";
 import { Button } from "../components";
-import { C, S, fontMono, fontBody } from "../lib/theme";
+import { C, fontMono } from "../lib/theme";
 import {
-  Navigation, ShieldCheck, Flame, Waves, MapPin, Home, AlertTriangle,
-  Crosshair, Target, CloudSun, Gauge, Clock, Route, ShieldAlert,
-  Sparkles, ChevronRight, Zap,
+  Navigation, ShieldCheck, MapPin, Home, AlertTriangle,
+  CloudSun, Route, ShieldAlert, Sparkles, Zap,
 } from "lucide-react";
 import shelterService from "../lib/services/shelterService";
 import routeService from "../lib/services/routeService";
 import { api } from "../lib/api";
 import { calculateHaversineMiles } from "../lib/haversine";
+import { useLocation } from "../lib/LocationContext";
 
 const EscapeMapOverlay = dynamic(() => import("../components/EscapeMapOverlay"), { ssr: false });
 
 const H = { display: "flex", alignItems: "center", gap: 8 };
 const V = { display: "flex", flexDirection: "column", gap: 4 };
 const DANGER_RADIUS_MILES = 0.125;
+
+// Session-level cache of the last route scan per location, so switching away
+// from the Routes tab and back doesn't trigger a full re-scan every time.
+const ROUTE_SCAN_CACHE = new Map();
+
+function scanKey(lat, lon) {
+  return `${(lat ?? 0).toFixed(6)},${(lon ?? 0).toFixed(6)}`;
+}
 
 const SEVERITY_LEVELS = ["Low", "Medium", "High"];
 const SEVERITY_COLORS = { Low: "#10B981", Medium: "#D97706", High: "#DC2626" };
@@ -71,23 +79,13 @@ function generateCoordsNearby(lat, lon, minMeters = 500, maxMeters = 1000) {
   return { lat: newLat * (180 / Math.PI), lon: newLon * (180 / Math.PI) };
 }
 
-function generateDemoWeather() {
-  const conditions = ["Sunny", "Partly Cloudy", "Cloudy", "Light Rain", "Clear"];
-  const c = conditions[Math.floor(Math.random() * conditions.length)];
-  return {
-    temp: Math.round(60 + Math.random() * 30),
-    condition: c,
-    humidity: Math.round(40 + Math.random() * 40),
-    windSpeed: Math.round(5 + Math.random() * 25),
-    windDir: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.floor(Math.random() * 8)],
-  };
-}
-
 export default function SafeRoutePlanner() {
+  const loc = useLocation();
   const [userCoords, setUserCoords] = useState(null);
   const [shelters, setShelters] = useState([]);
   const [recommended, setRecommended] = useState(null);
   const [routeGeojson, setRouteGeojson] = useState(null);
+  const [routeAlternatives, setRouteAlternatives] = useState([]);
   const [routeInfo, setRouteInfo] = useState(null);
   const [hazards, setHazards] = useState([]);
   const [dangerCircles, setDangerCircles] = useState([]);
@@ -100,20 +98,43 @@ export default function SafeRoutePlanner() {
   const [aiMessages, setAiMessages] = useState([]);
   const [aiConfidence, setAiConfidence] = useState(0);
   const [aiRunning, setAiRunning] = useState(false);
-  const [weatherData] = useState(generateDemoWeather);
+  const [weatherData, setWeatherData] = useState(null);
+  const [weatherUnavailable, setWeatherUnavailable] = useState(false);
   const [routeAnimKey, setRouteAnimKey] = useState(0);
 
   const simIntervalRef = useRef(null);
   const aiIntervalRef = useRef(null);
   const aiStepRef = useRef(0);
 
+  const applyScan = useCallback((d) => {
+    setUserCoords(d.userCoords);
+    setShelters(d.shelters || []);
+    setRecommended(d.recommended);
+    setRouteGeojson(d.routeGeojson);
+    setRouteAlternatives(d.routeAlternatives || []);
+    setRouteInfo(d.routeInfo);
+    setHazards(d.hazards || []);
+    setDangerCircles(d.dangerCircles || []);
+    setWeatherData(d.weatherData);
+    setWeatherUnavailable(d.weatherUnavailable);
+    setNoSafeRoute(d.noSafeRoute);
+  }, []);
+
   useEffect(() => {
-    run();
+    const key = scanKey(loc.lat, loc.lon);
+    const cached = ROUTE_SCAN_CACHE.get(key);
+    if (cached) {
+      applyScan(cached);
+      setLoading(false);
+    } else {
+      run();
+    }
     return () => {
       if (simIntervalRef.current) clearInterval(simIntervalRef.current);
       if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc.lat, loc.lon]);
 
   const runAiAnalysis = useCallback(async (haz, circles, sh) => {
     setAiRunning(true);
@@ -142,18 +163,23 @@ export default function SafeRoutePlanner() {
     setLoading(true);
     setNoSafeRoute(false);
     const startTime = Date.now();
-    const coords = await shelterService.getUserLocation();
+    const coords = { lat: loc.lat, lon: loc.lon, isRealGPS: loc.isRealGPS, accuracy: loc.accuracy };
     setUserCoords(coords);
 
-    const [shelterRes, alertsRes, fireRes, quakeRes] = await Promise.allSettled([
+    const [shelterRes, alertsRes, fireRes, quakeRes, weatherRes] = await Promise.allSettled([
       shelterService.fetchNearestShelters(coords.lat, coords.lon, 10),
       api.weather.alerts(coords.lat, coords.lon),
       api.wildfire.hotspots(),
       api.earthquake.recent(1, 48, coords.lat, coords.lon, 200),
+      api.weather.now(coords.lat, coords.lon),
     ]);
 
     const found = shelterRes.status === "fulfilled" && shelterRes.value.success ? shelterRes.value.shelters : [];
     setShelters(found);
+
+    const weather = weatherRes.status === "fulfilled" && weatherRes.value?.success ? weatherRes.value.data : null;
+    setWeatherData(weather);
+    setWeatherUnavailable(!weather);
 
     const alerts = alertsRes.status === "fulfilled" ? alertsRes.value?.alerts || [] : [];
     const allWildfires = fireRes.status === "fulfilled" ? fireRes.value?.data || [] : [];
@@ -167,24 +193,34 @@ export default function SafeRoutePlanner() {
     if (nearQuakes.length > 0) haz.push({ type: "quake", count: 1, items: nearQuakes.slice(0, 1), key: `quake-${Date.now()}` });
     if (alerts.length > 0) haz.push({ type: "alert", count: 1, items: alerts.slice(0, 1), key: `alert-${Date.now()}` });
 
-    if (haz.length === 0) {
-      haz.push({ type: "fire", count: 1, items: [{ latitude: coords.lat + 0.02, longitude: coords.lon + 0.01 }], key: `fire-${Date.now()}` });
-    }
     setHazards(haz);
 
     const circles = buildDangerCircles(haz);
     setDangerCircles(circles);
 
-    const shelterList = shelterService.generateDemoShelters(coords.lat, coords.lon, found);
-    setShelters(shelterList);
-
-    const nearest = findNearestSafeShelter(shelterList, circles, coords);
+    const nearest = findNearestSafeShelter(found, circles, coords);
+    let routeData = { routeInfo: null, routeAlternatives: [], routeGeojson: null, noSafeRoute: true };
     if (nearest) {
       setRecommended(nearest);
-      await calculateRoute(coords, nearest, circles);
+      routeData = (await calculateRoute(coords, nearest, circles)) || routeData;
     } else {
       setNoSafeRoute(true);
     }
+
+    ROUTE_SCAN_CACHE.set(scanKey(coords.lat, coords.lon), {
+      userCoords: coords,
+      shelters: found,
+      recommended: nearest,
+      hazards: haz,
+      dangerCircles: circles,
+      weatherData: weather,
+      weatherUnavailable: !weather,
+      noSafeRoute: nearest ? routeData.noSafeRoute : true,
+      routeInfo: routeData.routeInfo,
+      routeAlternatives: routeData.routeAlternatives,
+      routeGeojson: routeData.routeGeojson,
+    });
+
     const elapsed = Date.now() - startTime;
     if (elapsed < 3000) {
       await new Promise((r) => setTimeout(r, 3000 - elapsed));
@@ -235,18 +271,61 @@ export default function SafeRoutePlanner() {
     return findNearestSafeShelter(allShelters, circles, userCoords);
   }
 
+  function buildAlternativesGeojson(primary, alternatives) {
+    const features = [];
+    (alternatives || []).forEach((r, i) => {
+      if (!r?.geometry?.coordinates) return;
+      features.push({
+        type: "Feature",
+        properties: { role: "alternative", index: i, distance_km: r.distance_km, duration_min: r.duration_min },
+        geometry: r.geometry,
+      });
+    });
+    if (primary?.geometry?.coordinates) {
+      features.push({
+        type: "Feature",
+        properties: { role: "primary", distance_km: primary.distance_km, duration_min: primary.duration_min },
+        geometry: primary.geometry,
+      });
+    }
+    return features.length > 0 ? { type: "FeatureCollection", features } : null;
+  }
+
+  function routeStyle(feature) {
+    if (feature?.properties?.role === "alternative") {
+      return { color: C.teal, weight: 3, opacity: 0.35, dashArray: "6 6" };
+    }
+    return { color: C.teal, weight: 6, opacity: 0.9 };
+  }
+
+  function selectAlternative(index) {
+    const target = routeAlternatives[index];
+    if (!target) return;
+    setRouteInfo(target);
+    setRouteGeojson(buildAlternativesGeojson(target, routeAlternatives));
+  }
+
   async function calculateRoute(origin, destination, circles) {
-    if (!origin || !destination) return;
+    if (!origin || !destination) return { routeInfo: null, routeAlternatives: [], routeGeojson: null, noSafeRoute: true };
     setRouteLoading(true);
     setNoSafeRoute(false);
     setRouteGeojson(null);
+
+    let result = { routeInfo: null, routeAlternatives: [], routeGeojson: null, noSafeRoute: true };
 
     const routeRes = await routeService.calculateEvacuationRoute(origin, destination, "driving");
     if (routeRes.success && routeRes.routes) {
       const safeRoute = routeService.pickSafestRoute(routeRes.routes, circles);
       if (safeRoute) {
+        result = {
+          routeAlternatives: routeRes.routes,
+          routeInfo: safeRoute,
+          routeGeojson: buildAlternativesGeojson(safeRoute, routeRes.routes),
+          noSafeRoute: false,
+        };
+        setRouteAlternatives(result.routeAlternatives);
         setRouteInfo(safeRoute);
-        setRouteGeojson(routeService.toPolylineGeoJSON(safeRoute));
+        setRouteGeojson(result.routeGeojson);
         setRouteAnimKey((k) => k + 1);
       } else {
         setNoSafeRoute(true);
@@ -254,8 +333,10 @@ export default function SafeRoutePlanner() {
       }
     } else {
       setNoSafeRoute(true);
+      setRouteInfo(null);
     }
     setRouteLoading(false);
+    return result;
   }
 
   const handleShelterSelect = useCallback(async (s) => {
@@ -362,7 +443,7 @@ export default function SafeRoutePlanner() {
     ? [recommended.lat, recommended.lon]
     : userCoords
       ? [userCoords.lat, userCoords.lon]
-      : [40.802, -124.163];
+      : [loc.lat, loc.lon];
 
   const safetyScore = recommended ? getSafetyScore(recommended, dangerCircles) : 0;
 
@@ -505,8 +586,8 @@ export default function SafeRoutePlanner() {
               </span>
             </>
           ) : (
-            <div style={{ fontSize: 13, fontWeight: 700, color: C.red, padding: "4px 0" }}>
-              No safe shelter available nearby.
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.textDim, padding: "4px 0" }}>
+              No shelter selected yet.
             </div>
           )}
         </div>
@@ -555,20 +636,29 @@ export default function SafeRoutePlanner() {
             <CloudSun size={14} color={C.blue} />
             <span style={cardTitle}>Weather</span>
           </div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: C.text, fontFamily: fontMono }}>
-            {weatherData.temp}°F
-          </div>
-          <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
-            {weatherData.condition} · {weatherData.windSpeed} mph {weatherData.windDir}
-          </div>
-          <span style={badge(C.blue, C.blue + "18")}>Demo</span>
+          {weatherData ? (
+            <>
+              <div style={{ fontSize: 16, fontWeight: 800, color: C.text, fontFamily: fontMono }}>
+                {weatherData.temp_f != null ? `${weatherData.temp_f}°F` : "Unavailable"}
+              </div>
+              <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
+                {weatherData.condition || "Unavailable"}
+                {weatherData.wind_speed_mph != null ? ` · ${weatherData.wind_speed_mph} mph ${weatherData.wind_direction || ""}` : ""}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.textFaint }}>
+              {weatherUnavailable ? "Unavailable" : "Loading..."}
+            </div>
+          )}
+          <span style={badge(C.blue, C.blue + "18")}>Live</span>
         </div>
       </div>
 
       {/* Main Grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 10, flex: 1, minHeight: 0 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 10, alignItems: "stretch" }}>
         {/* Left Panel */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, overflow: "hidden" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {/* AI Analysis Panel */}
           <div style={{
             border: `1px solid ${aiRunning ? "#7C3AED" : C.line}`,
@@ -623,21 +713,117 @@ export default function SafeRoutePlanner() {
                   <span style={{ color: "#7C3AED", marginRight: 6 }}>▌</span>
                 </div>
               )}
+              {!aiRunning && aiMessages.length === 0 && (
+                <div style={{ fontSize: 12, color: C.textFaint, padding: "2px 0", lineHeight: 1.5 }}>
+                  GeoAI analysis only runs while a disaster simulation is active.
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Safe Shelter Card */}
+          {!loading && (
+            <div style={{
+              flexShrink: 0,
+              padding: 16, borderRadius: 12, display: "flex", flexDirection: "column",
+              border: `2px solid ${!recommended ? C.red : noSafeRoute ? C.amber : C.teal}`,
+              background: `linear-gradient(135deg, ${!recommended ? C.red : noSafeRoute ? C.amber : C.teal}18, transparent)`,
+              animation: "fadeInUp 0.3s ease",
+            }}>
+              {recommended ? (
+                <>
+                  <div>
+                    <div style={H}>
+                      <ShieldCheck size={18} color={noSafeRoute ? C.amber : C.teal} />
+                      <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: noSafeRoute ? C.amber : C.teal }}>
+                        Nearest Safe Shelter
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: C.text, marginTop: 6 }}>{recommended.name}</div>
+                    <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>{recommended.address}</div>
+                    <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 12, fontFamily: fontMono }}>
+                      <span style={{ color: C.teal, fontWeight: 700 }}>{recommended.dist}</span>
+                      <span style={{ color: C.textDim }}>Cap: {recommended.cap}</span>
+                      <span style={{ color: safetyScore > 70 ? C.teal : safetyScore > 30 ? C.amber : C.red, fontWeight: 700 }}>
+                        {safetyScore}% safe
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.textDim, fontFamily: fontMono, marginTop: 4 }}>
+                      🚶 ~{Math.round((recommended.distMiles || 0) * 20)} min walk · 🚗 ~{Math.max(1, Math.round((recommended.distMiles || 0) * 2))} min drive
+                    </div>
+                  </div>
+                  {routeInfo && (
+                    <div style={{ marginTop: 12, padding: "10px 12px", background: `${C.teal}15`, borderRadius: 8, border: `1px solid ${C.teal}33` }}>
+                      <div style={H}>
+                        <Navigation size={14} color={C.teal} />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
+                          🚗 {routeInfo.distance_km} km · {routeInfo.duration_min} min
+                        </span>
+                      </div>
+                      {routeAlternatives.length > 1 && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                          {routeAlternatives.map((r, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => selectAlternative(i)}
+                              style={{
+                                padding: "3px 9px",
+                                borderRadius: 6,
+                                border: `1px solid ${routeInfo === r ? C.teal : C.line}`,
+                                background: routeInfo === r ? `${C.teal}18` : C.panel,
+                                color: routeInfo === r ? C.teal : C.textDim,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                fontFamily: fontMono,
+                                cursor: "pointer",
+                              }}
+                            >
+                              {i === 0 ? "Fastest" : `Alt ${i}`} · {r.distance_km}km
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {noSafeRoute && (
+                    <div style={{ marginTop: 10, fontSize: 12, color: C.amber, fontWeight: 700, padding: "8px 10px", background: `${C.amber}10`, borderRadius: 8 }}>
+                      ⚠ Route blocked by danger zone. Selecting next safest shelter...
+                    </div>
+                  )}
+                  <Button
+                    variant={noSafeRoute ? "warning" : "success"}
+                    disabled={!routeInfo}
+                    onClick={() => alert("Evacuation started. Follow the route to safety.")}
+                    style={{ width: "100%", marginTop: 12, padding: "12px", fontWeight: 800, fontSize: 15 }}
+                  >
+                    <Navigation size={16} /> Start Evacuation
+                  </Button>
+                </>
+              ) : (
+                <div style={{ textAlign: "center", padding: "16px 0" }}>
+                  <AlertTriangle size={28} color={C.red} style={{ marginBottom: 8 }} />
+                  <div style={{ fontSize: 14, fontWeight: 800, color: C.red }}>No safe shelter available nearby.</div>
+                  <div style={{ fontSize: 12, color: C.textDim, marginTop: 4 }}>
+                    All shelters are inside the danger zone or unreachable.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Nearest Safe Shelters */}
           <div style={{
             display: "flex", flexDirection: "column", gap: 6,
             border: `1px solid ${C.line}`, borderRadius: 12, padding: 12,
-            background: C.panel, flex: 1, overflowY: "auto", minHeight: 0,
+            background: C.panel, maxHeight: 280, overflowY: "auto",
           }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: C.textFaint, marginBottom: 4 }}>
               <Home size={13} style={{ verticalAlign: -2, marginRight: 5 }} />
               Nearest Safe Shelters
             </div>
             {loading ? (
-              <div style={{ fontSize: 12, color: C.textFaint, padding: "8px 0" }}>Loading shelters...</div>
+              <div style={{ fontSize: 12, color: C.textFaint, padding: "8px 0" }}>Finding shelters nearby...</div>
             ) : shelters.length === 0 ? (
               <div style={{ fontSize: 12, color: C.textFaint, padding: "8px 0" }}>No shelters found nearby.</div>
             ) : (
@@ -715,97 +901,32 @@ export default function SafeRoutePlanner() {
               </div>
             </div>
           )}
-
-          {/* Safe Shelter Card */}
-          {!loading && (
-            <div style={{
-              flexShrink: 0,
-              padding: 16, borderRadius: 12, display: "flex", flexDirection: "column",
-              border: `2px solid ${!recommended ? C.red : noSafeRoute ? C.amber : C.teal}`,
-              background: `linear-gradient(135deg, ${!recommended ? C.red : noSafeRoute ? C.amber : C.teal}18, transparent)`,
-              animation: "fadeInUp 0.3s ease",
-            }}>
-              {recommended ? (
-                <>
-                  <div>
-                    <div style={H}>
-                      <ShieldCheck size={18} color={noSafeRoute ? C.amber : C.teal} />
-                      <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: noSafeRoute ? C.amber : C.teal }}>
-                        Nearest Safe Shelter
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: C.text, marginTop: 6 }}>{recommended.name}</div>
-                    <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>{recommended.address}</div>
-                    <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 12, fontFamily: fontMono }}>
-                      <span style={{ color: C.teal, fontWeight: 700 }}>{recommended.dist}</span>
-                      <span style={{ color: C.textDim }}>Cap: {recommended.cap}</span>
-                      <span style={{ color: safetyScore > 70 ? C.teal : safetyScore > 30 ? C.amber : C.red, fontWeight: 700 }}>
-                        {safetyScore}% safe
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 11, color: C.textDim, fontFamily: fontMono, marginTop: 4 }}>
-                      🚶 ~{Math.round((recommended.distMiles || 0) * 20)} min walk · 🚗 ~{Math.max(1, Math.round((recommended.distMiles || 0) * 2))} min drive
-                    </div>
-                  </div>
-                  {routeInfo && (
-                    <div style={{ marginTop: 12, padding: "10px 12px", background: `${C.teal}15`, borderRadius: 8, border: `1px solid ${C.teal}33` }}>
-                      <div style={H}>
-                        <Navigation size={14} color={C.teal} />
-                        <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
-                          🚗 {routeInfo.distance_km} km · {routeInfo.duration_min} min
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  {noSafeRoute && (
-                    <div style={{ marginTop: 10, fontSize: 12, color: C.amber, fontWeight: 700, padding: "8px 10px", background: `${C.amber}10`, borderRadius: 8 }}>
-                      ⚠ Route blocked by danger zone. Selecting next safest shelter...
-                    </div>
-                  )}
-                  <Button
-                    variant={noSafeRoute ? "warning" : "success"}
-                    disabled={!routeInfo}
-                    onClick={() => alert("Evacuation started. Follow the route to safety.")}
-                    style={{ width: "100%", marginTop: 12, padding: "12px", fontWeight: 800, fontSize: 15 }}
-                  >
-                    <Navigation size={16} /> Start Evacuation
-                  </Button>
-                </>
-              ) : (
-                <div style={{ textAlign: "center", padding: "16px 0" }}>
-                  <AlertTriangle size={28} color={C.red} style={{ marginBottom: 8 }} />
-                  <div style={{ fontSize: 14, fontWeight: 800, color: C.red }}>No safe shelter available nearby.</div>
-                  <div style={{ fontSize: 12, color: C.textDim, marginTop: 4 }}>
-                    All shelters are inside the danger zone or unreachable.
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Map */}
-        <div style={{ borderRadius: 14, overflow: "hidden", border: `1px solid ${C.line}`, position: "relative" }}>
-          <MapFrame
-            height={550}
-            center={mapCenter}
-            zoom={13}
-            geojson={routeGeojson}
-            geoStyle={routeService.getPolylineStyle(C.teal)}
-          >
-            <EscapeMapOverlay
-              userCoords={userCoords}
-              dangerCircles={dangerCircles.map((d) => ({
-                ...d,
-                currentRadius: d.key === simulation?.key ? simRadius : undefined,
-              }))}
-              recommended={recommended}
-              hazards={hazards}
-              shelters={shelters}
-              disasterSimulation={simulation}
-              onShelterClick={handleShelterSelect}
-            />
-          </MapFrame>
+        <div style={{ borderRadius: 14, overflow: "hidden", border: `1px solid ${C.line}`, position: "relative", display: "flex", flexDirection: "column", minHeight: 550 }}>
+          <div style={{ flex: 1, minHeight: 550 }}>
+            <MapFrame
+              height="100%"
+              center={mapCenter}
+              zoom={13}
+              geojson={routeGeojson}
+              geoStyle={routeStyle}
+            >
+              <EscapeMapOverlay
+                userCoords={userCoords}
+                dangerCircles={dangerCircles.map((d) => ({
+                  ...d,
+                  currentRadius: d.key === simulation?.key ? simRadius : undefined,
+                }))}
+                recommended={recommended}
+                hazards={hazards}
+                shelters={shelters}
+                disasterSimulation={simulation}
+                onShelterClick={handleShelterSelect}
+              />
+            </MapFrame>
+          </div>
         </div>
       </div>
     </div>

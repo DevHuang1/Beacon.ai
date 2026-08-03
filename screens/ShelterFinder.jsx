@@ -8,19 +8,19 @@ import EscapeMapContent from "./EscapeMapContent";
 import shelterService from "../lib/services/shelterService";
 import routeService from "../lib/services/routeService";
 import { validateAndFilterShelters } from "../lib/haversine";
+import { useShelters } from "../lib/swr";
 import { useLocation } from "../lib/LocationContext";
 
 export default function ShelterFinder() {
   const loc = useLocation();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
-  const [maxRadius, setMaxRadius] = useState(10);
+  const [maxRadius, setMaxRadius] = useState(() => shelterService.getDefaultRadius());
   const [selected, setSelected] = useState(null);
-  const [shelters, setShelters] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [userGps, setUserGps] = useState({ lat: loc.lat, lon: loc.lon, isRealGPS: loc.isRealGPS });
   const [routeInfo, setRouteInfo] = useState(null);
   const [routeGeojson, setRouteGeojson] = useState(null);
+  const [routeAlternatives, setRouteAlternatives] = useState([]);
   const [routeLoading, setRouteLoading] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -29,32 +29,32 @@ export default function ShelterFinder() {
   const [showStorms, setShowStorms] = useState(true);
   const popupRefs = useRef({});
 
-  useEffect(() => {
-    loadNearestShelters();
-  }, [loc.lat, loc.lon]);
+  const radiusParam = maxRadius === "All" ? 50 : maxRadius;
+  const { shelters, userLocation, shelterLoading, mutate } = useShelters(loc.lat, loc.lon, radiusParam);
 
-  const loadNearestShelters = async (radius = maxRadius) => {
-    setLoading(true);
-    const res = await shelterService.fetchNearestShelters(loc.lat, loc.lon, radius);
-    if (res.success) {
-      setShelters(res.allShelters && res.allShelters.length > 0 ? res.allShelters : res.shelters);
-      setUserGps(res.userCoords);
-      if (res.shelters.length > 0) {
-        const primary = res.shelters[0];
-        setSelected(primary);
-        calculateRouteToShelter(res.userCoords, primary);
-      }
+  useEffect(() => {
+    if (userLocation) {
+      setUserGps((prev) => ({
+        ...prev,
+        lat: userLocation.lat,
+        lon: userLocation.lon,
+        isRealGPS: prev.isRealGPS && loc.isRealGPS,
+      }));
     }
-    setLoading(false);
-  };
+  }, [userLocation, loc.isRealGPS]);
+
+  useEffect(() => {
+    if (!selected && shelters.length > 0) {
+      setSelected(shelters[0]);
+      calculateRouteToShelter(userGps, shelters[0]);
+    }
+  }, [shelters]);
 
   const handleAiAutoFind = async () => {
     setAiLoading(true);
-    setLoading(true);
     const res = await shelterService.findSheltersWithAI(loc.lat, loc.lon);
     if (res.success) {
-      setShelters(res.shelters);
-      setUserGps(res.userCoords);
+      mutate({ success: true, data: { shelters: res.shelters, userLocation: { lat: loc.lat, lon: loc.lon } } }, { revalidate: false });
       if (res.recommendedShelter) {
         setSelected(res.recommendedShelter);
         calculateRouteToShelter(res.userCoords, res.recommendedShelter);
@@ -63,8 +63,34 @@ export default function ShelterFinder() {
         setAiAnalysis(res.aiData);
       }
     }
-    setLoading(false);
     setAiLoading(false);
+  };
+
+  const buildAlternativesGeojson = (primary, alternatives) => {
+    const features = [];
+    (alternatives || []).forEach((r, i) => {
+      if (!r?.geometry?.coordinates) return;
+      features.push({
+        type: "Feature",
+        properties: { role: "alternative", index: i, distance_km: r.distance_km, duration_min: r.duration_min },
+        geometry: r.geometry,
+      });
+    });
+    if (primary?.geometry?.coordinates) {
+      features.push({
+        type: "Feature",
+        properties: { role: "primary", distance_km: primary.distance_km, duration_min: primary.duration_min },
+        geometry: primary.geometry,
+      });
+    }
+    return features.length > 0 ? { type: "FeatureCollection", features } : null;
+  };
+
+  const routeStyle = (feature) => {
+    if (feature?.properties?.role === "alternative") {
+      return { color: "#0D9488", weight: 3, opacity: 0.4, dashArray: "6 6" };
+    }
+    return { color: "#0D9488", weight: 6, opacity: 0.9 };
   };
 
   const calculateRouteToShelter = useCallback(async (originCoords, destinationShelter) => {
@@ -76,15 +102,24 @@ export default function ShelterFinder() {
       "driving"
     );
 
-    if (res.success) {
-      setRouteInfo(res.route);
-      setRouteGeojson(res.geojson);
+    if (res.success && res.routes?.length > 0) {
+      setRouteAlternatives(res.routes);
+      setRouteInfo(res.routes[0]);
+      setRouteGeojson(buildAlternativesGeojson(res.routes[0], res.routes));
     } else {
+      setRouteAlternatives([]);
       setRouteInfo(null);
       setRouteGeojson(null);
     }
     setRouteLoading(false);
   }, [userGps]);
+
+  const selectAlternative = (index) => {
+    const target = routeAlternatives[index];
+    if (!target) return;
+    setRouteInfo(target);
+    setRouteGeojson(buildAlternativesGeojson(target, routeAlternatives));
+  };
 
   // Client-side Haversine distance validation & radius cutoff
   const { verifiedShelters, filteredCount } = useMemo(() => {
@@ -104,9 +139,8 @@ export default function ShelterFinder() {
   const handleSelectShelter = (sh) => {
     setSelected(sh);
     calculateRouteToShelter(userGps, sh);
-    if (popupRefs.current[sh.id] && popupRefs.current[sh.id].openPopup) {
-      popupRefs.current[sh.id].openPopup();
-    }
+    const p = popupRefs.current[sh.id];
+    if (p && p.openOn) p.openOn(p._source._map);
   };
 
   const handleOpenDirections = (sh) => {
@@ -169,14 +203,14 @@ export default function ShelterFinder() {
 
         <Button
           variant="secondary"
-          onClick={() => loadNearestShelters(maxRadius)}
-          disabled={loading || aiLoading}
+          onClick={() => mutate()}
+          disabled={shelterLoading || aiLoading}
           style={{ padding: "0 16px", display: "flex", alignItems: "center", gap: 8, height: 46 }}
-          ariaLabel="Acquire current GPS coordinates and update nearest shelters"
+          ariaLabel="Refresh nearest shelters from current GPS coordinates"
         >
           <LocateFixed size={16} color={userGps?.isRealGPS ? C.teal : C.blue} />
           <span style={{ fontSize: 13, fontWeight: 700 }}>
-            {loading && !aiLoading ? "Locating..." : userGps?.isRealGPS ? "GPS Active" : "Use GPS"}
+            {shelterLoading && !aiLoading ? "Locating..." : userGps?.isRealGPS ? "GPS Active" : "Use GPS"}
           </span>
         </Button>
         <Button
@@ -246,10 +280,12 @@ export default function ShelterFinder() {
           display: "flex", flexDirection: "column", gap: 12,
           maxHeight: 600, overflowY: "auto", paddingRight: 6,
         }}>
-          {loading && [1, 2, 3].map((i) => (
-            <div key={i} className="skeleton" style={{ height: 140, borderRadius: 12 }} />
-          ))}
-          {!loading && filtered.length === 0 && (
+          {shelterLoading && (
+            <div style={{ padding: 30, textAlign: "center", color: C.textFaint, fontSize: 14, fontWeight: 600 }}>
+              Finding shelters nearby...
+            </div>
+          )}
+          {!shelterLoading && filtered.length === 0 && (
             <div style={{ color: C.textFaint, fontSize: 14, padding: 30, textAlign: "center" }}>
               {shelters.length === 0
                 ? "No shelters found near your location. OpenStreetMap may not have data for this area."
@@ -295,6 +331,31 @@ export default function ShelterFinder() {
               </div>
             ) : (
               <div style={{ fontWeight: 700, color: C.text }}>Interactive Disaster Map</div>
+            )}
+
+            {routeAlternatives.length > 1 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                {routeAlternatives.map((r, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => selectAlternative(i)}
+                    style={{
+                      padding: "3px 9px",
+                      borderRadius: 6,
+                      border: `1px solid ${routeInfo === r ? C.teal : C.line}`,
+                      background: routeInfo === r ? `${C.teal}18` : C.panel,
+                      color: routeInfo === r ? C.teal : C.textDim,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      fontFamily: fontMono,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {i === 0 ? "Fastest" : `Alt ${i}`} · {r.distance_km}km
+                  </button>
+                ))}
+              </div>
             )}
 
             {/* Weather & Disaster Map Layer Controls */}
@@ -364,7 +425,7 @@ export default function ShelterFinder() {
             center={selected ? [selected.lat, selected.lon] : [loc.lat, loc.lon]}
             zoom={13}
             geojson={routeGeojson}
-            geoStyle={routeService.getPolylineStyle("#0D9488")}
+            geoStyle={routeStyle}
           >
             <EscapeMapContent
               shelters={filtered}

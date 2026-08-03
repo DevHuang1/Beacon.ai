@@ -1,20 +1,37 @@
-export default function handler(req, res) {
+const PYTHON_SERVICE = process.env.GEOAI_SERVICE_URL || "http://127.0.0.1:8001";
+
+export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed" });
   }
 
-  res.status(200).json({
-    success: true,
-    data: {
-      detections: [
-        { type: "building", confidence: 0.92, bbox: [120, 45, 200, 130] },
-        { type: "building", confidence: 0.88, bbox: [310, 80, 380, 155] },
-        { type: "vehicle", confidence: 0.76, bbox: [50, 200, 85, 230] },
-        { type: "road", confidence: 0.95, bbox: [0, 150, 400, 170] },
-        { type: "vegetation", confidence: 0.91, bbox: [200, 200, 350, 280] },
-      ],
-      model_used: "detectron2",
-    },
-    source: "geoai",
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const body = JSON.stringify(req.body);
+    const response = await fetch(`${PYTHON_SERVICE}/detect`, {
+      method: "POST",
+      headers: {
+        "Content-Type": req.headers["Content-Type"] || "application/json",
+        "Content-Length": String(Buffer.byteLength(body)),
+      },
+      body,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`GeoAI service responded with ${response.status}`);
+    }
+
+    const data = await response.json();
+    return res.status(response.status).json(data);
+  } catch (err) {
+    return res.status(502).json({
+      success: false,
+      error: "GeoAI service unavailable on :8001 — start it with: uvicorn main:app --port 8001",
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }

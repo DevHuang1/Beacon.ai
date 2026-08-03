@@ -1,13 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { PageHeader, Panel, Toggle } from "../components";
 import MapFrame from "../components/MapFrameWrapper";
 import WeatherAlertMapOverlay from "../components/WeatherAlertMapOverlayWrapper";
-import { Search, CloudRain, Wind, Droplets, TriangleAlert, Sun, Moon, Cloud, ShieldAlert } from "lucide-react";
+import { Search, CloudRain, Wind, Droplets, TriangleAlert, ShieldAlert, MapPin, Loader } from "lucide-react";
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
-import { api } from "../lib/api";
+import { useWeatherForecast } from "../lib/swr";
 import { useLocation } from "../lib/LocationContext";
-
-const ICON_MAP = { sunny: Sun, cloudy: Cloud, rain: CloudRain };
 
 export default function WeatherAlerts() {
   const loc = useLocation();
@@ -15,30 +13,39 @@ export default function WeatherAlerts() {
   const [notifLoc, setNotifLoc] = useState(true);
   const [notifSevere, setNotifSevere] = useState(false);
   const [search, setSearch] = useState("");
-  const [forecast, setForecast] = useState(null);
-  const [rain12h, setRain12h] = useState(null);
-  const [alerts, setAlerts] = useState([]);
-  const [current, setCurrent] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchingLoc, setSearchingLoc] = useState(false);
 
-  const loadForecastForLocation = (lat, lon) => {
-    setLoading(true);
-    api.weather.forecast(lat, lon).then((res) => {
-      if (res?.success && res.data) {
-        setForecast(res.data.forecast?.slice(0, 7) || []);
-        if (res.data.rain_12h) setRain12h(res.data.rain_12h);
-        if (res.data.alerts) setAlerts(res.data.alerts);
-        if (res.data.current) setCurrent(res.data.current);
-      } else {
-        setError(res?.error || "Failed to load weather data");
-      }
-    }).catch((err) => setError(err.message)).finally(() => setLoading(false));
+  const { forecastData, forecastError } = useWeatherForecast(loc.lat, loc.lon);
+  const forecast = forecastData?.forecast?.slice(0, 7) || [];
+  const rain12h = forecastData?.rain_12h || null;
+  const alerts = forecastData?.alerts || [];
+  const current = forecastData?.current || null;
+  const error = forecastError;
+  const loading = !forecastData && !forecastError;
+
+  const searchLocation = (query) => {
+    if (!query || query.trim().length < 2) { setSearchResults([]); return; }
+    setSearchingLoc(true);
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&accept-language=en`;
+    fetch(url, { headers: { "User-Agent": "BeaconAI-EmergencyApp/1.0" } })
+      .then((r) => r.json())
+      .then((data) => {
+        setSearchResults((data || []).map((r) => ({
+          label: r.display_name,
+          lat: parseFloat(r.lat).toFixed(6),
+          lon: parseFloat(r.lon).toFixed(6),
+        })));
+      })
+      .catch(() => setSearchResults([]))
+      .finally(() => setSearchingLoc(false));
   };
 
-  useEffect(() => {
-    loadForecastForLocation(loc.lat, loc.lon);
-  }, [loc.lat, loc.lon]);
+  const selectLocationResult = (r) => {
+    loc.updateLocation(parseFloat(r.lat), parseFloat(r.lon), r.label);
+    setSearch(r.label.split(",")[0]);
+    setSearchResults([]);
+  };
 
   const hasData = current || (forecast && forecast.length > 0);
   const days = forecast || [];
@@ -84,13 +91,27 @@ export default function WeatherAlerts() {
             <Search size={15} color={C.textFaint} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); searchLocation(e.target.value); }}
               placeholder="Search a location"
+              aria-label="Search a location"
               style={{
                 width: "100%", background: C.panel2, border: `1px solid ${C.line}`,
                 borderRadius: 10, padding: "12px 16px 12px 40px", color: C.text, fontSize: 14,
               }}
             />
+            {searchingLoc && <Loader size={14} color={C.textFaint} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)" }} />}
+            {searchResults.length > 0 && (
+              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 6, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden", boxShadow: S.glow(C.teal), zIndex: 100 }}>
+                {searchResults.map((r, i) => (
+                  <div key={i} onClick={() => selectLocationResult(r)}
+                    style={{ padding: "10px 14px", cursor: "pointer", fontSize: 13, color: C.text, display: "flex", alignItems: "center", gap: 8, borderBottom: i < searchResults.length - 1 ? `1px solid ${C.lineSoft}` : "none", background: C.panel }}>
+                    <MapPin size={13} color={C.teal} style={{ flexShrink: 0 }} />
+                    <span style={{ flex: 1 }}>{r.label}</span>
+                    <span style={{ fontSize: 11, fontFamily: fontMono, color: C.textFaint }}>{r.lat}, {r.lon}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {hasData && (

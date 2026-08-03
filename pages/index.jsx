@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { TopBar, StatusRibbon, SideNav, AlertDrawer } from "../components";
 import TutorialOverlay, { useTutorial } from "../components/Tutorial";
+import EmergencyAlertListener from "../components/EmergencyAlertListener";
 import screens from "../screens";
 import theme, { fontBody } from "../lib/theme";
 
@@ -48,6 +49,7 @@ export default function Home() {
         </div>
       </div>
       <AlertDrawer open={alertOpen} onClose={() => setAlertOpen(false)} />
+      <EmergencyAlertListener />
       {tutorial.active && <TutorialOverlay onDone={tutorial.dismiss} />}
     </div>
   );

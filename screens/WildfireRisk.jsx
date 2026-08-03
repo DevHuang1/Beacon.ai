@@ -2,33 +2,9 @@ import React, { useState, useEffect } from "react";
 import { PageHeader, Panel, Button } from "../components";
 import MapFrame from "../components/MapFrameWrapper";
 import { Flame, Wind, Thermometer, Satellite, ToggleLeft, ToggleRight } from "lucide-react";
-import { C, S, fontDisplay, fontMono } from "../lib/theme";
+import { C, S, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
-import firmsService from "../lib/services/firmsService";
 import WildfireHotspotOverlay from "../components/WildfireHotspotOverlayWrapper";
-
-function makeBurnScarGeojson() {
-  const centerLon = -124.14, centerLat = 40.83;
-  return {
-    type: "FeatureCollection",
-    features: [{
-      type: "Feature",
-      properties: { label: "Burn scar", source: "OpenGeoAI segmentation" },
-      geometry: {
-        type: "Polygon",
-        coordinates: [[
-          [centerLon - 0.05, centerLat - 0.03],
-          [centerLon + 0.02, centerLat - 0.04],
-          [centerLon + 0.06, centerLat - 0.01],
-          [centerLon + 0.04, centerLat + 0.03],
-          [centerLon - 0.01, centerLat + 0.05],
-          [centerLon - 0.04, centerLat + 0.02],
-          [centerLon - 0.05, centerLat - 0.03],
-        ]],
-      },
-    }],
-  };
-}
 
 export default function WildfireRisk() {
   const [hotspots, setHotspots] = useState([]);
@@ -37,6 +13,7 @@ export default function WildfireRisk() {
   const [scarMode, setScarMode] = useState(false);
   const [scarData, setScarData] = useState(null);
   const [scarLoading, setScarLoading] = useState(false);
+  const [scarError, setScarError] = useState(null);
 
   useEffect(() => {
     api.wildfire.conditions().then((res) => {
@@ -50,21 +27,25 @@ export default function WildfireRisk() {
   }, []);
 
   useEffect(() => {
-    if (!scarMode) { setScarData(null); return; }
+    if (!scarMode) { setScarData(null); setScarError(null); return; }
     setScarLoading(true);
+    setScarError(null);
     api.geoai.segment({ image: {} }).then((res) => {
-      if (res?.success) setScarData(res.data);
-    }).catch(() => {}).finally(() => setScarLoading(false));
+      if (res?.success) {
+        setScarData(res.data);
+      } else {
+        setScarData(null);
+        setScarError(res?.error || "Burn scar segmentation failed");
+      }
+    }).catch((err) => {
+      setScarData(null);
+      setScarError(err.message || "Burn scar segmentation failed");
+    }).finally(() => setScarLoading(false));
   }, [scarMode]);
 
   const hasData = hotspots.length > 0;
-  const scarGeo = scarMode ? makeBurnScarGeojson() : null;
+  const scarGeo = scarMode && scarData?.type === "FeatureCollection" ? scarData : null;
   const scarStyle = () => ({ color: C.red, weight: 2, fillColor: "#8B0000", fillOpacity: 0.2 });
-
-  const toSvg = (lat, lng) => ({
-    x: 50 + ((lng + 124.5) * 400) % 300,
-    y: 50 + ((lat - 40.5) * 300) % 200,
-  });
 
   return (
     <div style={{ animation: "fadeIn 0.3s ease" }}>
@@ -102,6 +83,19 @@ export default function WildfireRisk() {
         </div>
       )}
 
+      {scarMode && (scarLoading || scarError) && (
+        <div style={{
+          background: C.amberDim, border: `1px solid ${C.amber}55`, borderRadius: 12,
+          padding: "14px 18px", marginBottom: 18, fontSize: 13, color: C.amber,
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.amber, flexShrink: 0 }} />
+          {scarLoading
+            ? "Requesting burn scar segmentation..."
+            : `Burn scar segmentation requires a satellite image — GeoAI service returned: ${scarError}`}
+        </div>
+      )}
+
       {!hasData && !error && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 20 }}>
           <div className="skeleton" style={{ height: 460, borderRadius: 14 }} />
@@ -123,7 +117,7 @@ export default function WildfireRisk() {
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ width: 10, height: 10, borderRadius: "50%", background: C.red, display: "inline-block", boxShadow: S.glow(C.red) }} /> Hotspot
             </span>
-            {scarMode && (
+            {scarGeo && (
               <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 16, height: 16, borderRadius: 2, background: "#8B000080", display: "inline-block", border: "1px solid #ff0000" }} /> Burn scar
               </span>

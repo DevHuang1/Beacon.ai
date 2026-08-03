@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { PageHeader, Panel, Badge, Button } from "../components";
 import MapFrame from "../components/MapFrameWrapper";
-import SvgOverlayContent from "../components/SvgOverlayContent";
 import { Waves, Droplets, Gauge, TrendingUp, Satellite, ToggleLeft, ToggleRight } from "lucide-react";
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
+import { useLocation } from "../lib/LocationContext";
 
 const TONE_MAP = { high: "critical", moderate: "warning", low: "safe" };
 
-function makeFloodGeojson(waterPct) {
-  const centerLon = -124.16, centerLat = 40.8;
+function makeFloodGeojson(waterPct, centerLat, centerLon) {
   const size = 0.04 * (waterPct / 12);
   return {
     type: "FeatureCollection",
@@ -32,6 +31,7 @@ function makeFloodGeojson(waterPct) {
 }
 
 export default function FloodMonitoring() {
+  const loc = useLocation();
   const [gauges, setGauges] = useState(null);
   const [riskZones, setRiskZones] = useState(null);
   const [stats, setStats] = useState(null);
@@ -39,9 +39,10 @@ export default function FloodMonitoring() {
   const [satMode, setSatMode] = useState(false);
   const [satData, setSatData] = useState(null);
   const [satLoading, setSatLoading] = useState(false);
+  const [satError, setSatError] = useState(null);
 
   useEffect(() => {
-    api.water.gauges().then((res) => {
+    api.water.gauges(loc.lat, loc.lon).then((res) => {
       if (res?.success && res.data) {
         if (res.data.stations) setGauges(res.data.stations);
         if (res.data.risk_zones) setRiskZones(res.data.risk_zones);
@@ -50,20 +51,29 @@ export default function FloodMonitoring() {
         setError(res?.error || "Failed to load water data");
       }
     }).catch((err) => setError(err.message));
-  }, []);
+  }, [loc.lat, loc.lon]);
 
   useEffect(() => {
-    if (!satMode) { setSatData(null); return; }
+    if (!satMode) { setSatData(null); setSatError(null); return; }
     setSatLoading(true);
+    setSatError(null);
     api.geoai.waterDetect({}).then((res) => {
-      if (res?.success) setSatData(res.data);
-    }).catch(() => {}).finally(() => setSatLoading(false));
+      if (res?.success) {
+        setSatData(res.data);
+      } else {
+        setSatData(null);
+        setSatError(res?.error || "Satellite flood detection failed");
+      }
+    }).catch((err) => {
+      setSatData(null);
+      setSatError(err.message || "Satellite flood detection failed");
+    }).finally(() => setSatLoading(false));
   }, [satMode]);
 
   const gaugeList = gauges || [];
   const riskList = riskZones || [];
   const hasData = gaugeList.length > 0;
-  const floodGeo = satData ? makeFloodGeojson(satData.water_pct) : null;
+  const floodGeo = satData && satData.water_pct != null ? makeFloodGeojson(satData.water_pct, loc.lat, loc.lon) : null;
   const floodStyle = () => ({ color: C.blue, weight: 2, fillColor: C.blue, fillOpacity: 0.15 });
 
   return (
@@ -164,25 +174,39 @@ export default function FloodMonitoring() {
         </>
       )}
 
-      <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14 }}>
+      <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14, position: "relative" }}>
         <MapFrame height={440} geojson={floodGeo} geoStyle={floodStyle}>
-          <SvgOverlayContent>
-            <text x="14" y="24" fontFamily={fontMono} fontSize="10" fill={C.textFaint}>
-              {satMode ? "Satellite flood extent overlay · OpenGeoAI" : `${gaugeList.length} active gauges · USGS NWIS`}
-            </text>
-            {gaugeList.map((s, i) => {
-              const cx = 60 + (i * 110) % 340;
-              const cy = 80 + (i * 80) % 200;
-              const color = s.risk === "high" ? C.red : s.risk === "moderate" ? C.amber : C.teal;
-              return (
-                <g key={s.name}>
-                  <circle cx={cx} cy={cy} r="8" fill={color} stroke={C.bg} strokeWidth="2" />
-                  <text x={cx + 13} y={cy + 4} fontFamily={fontMono} fontSize="9" fill={C.textFaint}>{s.name}</text>
-                </g>
-              );
-            })}
-          </SvgOverlayContent>
+          {satMode && (satLoading || satError) && (
+            <div style={{
+              position: "absolute", top: 14, left: 14, zIndex: 1000, pointerEvents: "none",
+              background: C.amberDim, border: `1px solid ${C.amber}55`, borderRadius: 8,
+              padding: "8px 12px", fontSize: 11, color: C.amber, fontWeight: 600, maxWidth: 320,
+              lineHeight: 1.4,
+            }}>
+              {satLoading
+                ? "Requesting satellite flood detection..."
+                : `Satellite flood detection requires a satellite image — GeoAI service returned: ${satError}`}
+            </div>
+          )}
         </MapFrame>
+        <div style={{
+          position: "absolute", bottom: 14, left: 14, zIndex: 1000, pointerEvents: "none",
+          background: `${C.panel}DD`, border: `1px solid ${C.line}`, borderRadius: 8,
+          padding: "6px 10px", fontFamily: fontMono, fontSize: 10, color: C.textFaint,
+          backdropFilter: "blur(8px)",
+        }}>
+          {satMode && floodGeo ? "Satellite flood extent overlay" : `${gaugeList.length} active gauges · USGS NWIS`}
+        </div>
+        <div style={{
+          position: "absolute", bottom: 14, right: 14, zIndex: 1000, pointerEvents: "none",
+          background: `${C.panel}DD`, border: `1px solid ${C.line}`, borderRadius: 8,
+          padding: "6px 10px", fontFamily: fontMono, fontSize: 10, color: C.textFaint,
+          backdropFilter: "blur(8px)",
+        }}>
+          {gaugeList.filter((g) => g.latitude).length > 0
+            ? `${gaugeList.filter((g) => g.latitude).length} gauges with coordinates · USGS NWIS`
+            : "Gauge positions unavailable for this area"}
+        </div>
       </Panel>
     </div>
   );

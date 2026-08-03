@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/router";
 import { MODULES } from "../data/mockData";
 import theme, { fontMono } from "../lib/theme";
@@ -14,6 +14,10 @@ import {
 
 const C = theme.C;
 const S = theme.S;
+
+function fetchWeatherAlerts(lat, lon) {
+  return fetch(`/api/weather?type=alerts&lat=${lat}&lon=${lon}`).then((r) => r.json());
+}
 
 export function StatusRibbon({ activeModule }) {
   const contextMap = {
@@ -60,10 +64,21 @@ export function StatusRibbon({ activeModule }) {
 
 export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [alertCount, setAlertCount] = useState(0);
   const { user } = useAuth();
   const router = useRouter();
   const initials = user?.email?.charAt(0).toUpperCase() || "?";
   const loc = useLocation();
+
+  const loadAlerts = useCallback(() => {
+    fetchWeatherAlerts(loc.lat, loc.lon)
+      .then((d) => setAlertCount(d?.success ? (d.alerts?.length || 0) : 0))
+      .catch(() => setAlertCount(0));
+  }, [loc.lat, loc.lon]);
+
+  useEffect(() => {
+    loadAlerts();
+  }, [loadAlerts]);
 
   const handleLogout = async () => {
     const supabase = createClient();
@@ -122,7 +137,7 @@ export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp })
           <span style={{ color: C.text, fontWeight: 600 }}>{loc.coords}</span>
           {loc.gpsStatus === "live" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.teal }} />}
         </div>
-        <Button variant="danger" ariaLabel="Open alerts" onClick={onOpenAlert} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", fontWeight: 700 }}>
+        <Button variant="danger" ariaLabel="Open alerts" onClick={() => { onOpenAlert(); loadAlerts(); }} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", fontWeight: 700 }}>
           <Bell size={15} strokeWidth={2.4} aria-hidden />
           <span aria-hidden>Active Alerts</span>
           <span aria-live="polite" style={{
@@ -134,7 +149,7 @@ export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp })
             borderRadius: 10,
             padding: "1px 8px",
             marginLeft: 2,
-          }}>2</span>
+          }}>{alertCount}</span>
         </Button>
 
         <div style={{ position: "relative" }}>
@@ -195,6 +210,20 @@ export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp })
 export function SideNav({ active, onNavigate, collapsed }) {
   const primaryModules = MODULES.slice(0, 4);
   const monitoringModules = MODULES.slice(4);
+  const loc = useLocation();
+
+  const handleSos = async () => {
+    if (typeof window === "undefined") return;
+    const mapsUrl = `https://www.google.com/maps?q=${loc.lat},${loc.lon}`;
+    const msg = `🚨 BEACON.AI SOS — My live location: ${mapsUrl}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "SOS Location", text: msg });
+      } else {
+        await navigator.clipboard.writeText(msg);
+      }
+    } catch {}
+  };
 
   return (
     <nav aria-label="Primary modules" style={{
@@ -364,14 +393,14 @@ export function SideNav({ active, onNavigate, collapsed }) {
             <span style={{ fontSize: 13, fontWeight: 800, color: C.red }}>SOS Emergency</span>
           </div>
           <p style={{ fontSize: 11, color: C.textDim, margin: 0, lineHeight: 1.3 }}>
-            Broadcast location & status to family and emergency services.
+            Share your live location via your device share sheet or clipboard.
           </p>
           <Button
             variant="danger"
-            onClick={() => alert("SOS Signal Transmitted to Emergency Services (911 & Family Network)!")}
+            onClick={handleSos}
             style={{ width: "100%", padding: "8px 12px", fontSize: 12, fontWeight: 800 }}
           >
-            Broadcast SOS Signal
+            Share SOS Location
           </Button>
         </div>
       )}
@@ -380,12 +409,36 @@ export function SideNav({ active, onNavigate, collapsed }) {
 }
 
 export function AlertDrawer({ open, onClose }) {
+  const loc = useLocation();
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    setError(null);
+    fetchWeatherAlerts(loc.lat, loc.lon)
+      .then((d) => {
+        if (d?.success) setAlerts(d.alerts || []);
+        else {
+          setAlerts([]);
+          setError(d?.error || "Failed to load alerts");
+        }
+      })
+      .catch(() => {
+        setAlerts([]);
+        setError("Failed to load alerts");
+      })
+      .finally(() => setLoading(false));
+  }, [open, loc.lat, loc.lon]);
+
   if (!open) return null;
 
-  const alerts = [
-    { tone: "critical", title: "Mandatory evacuation — Downtown District", time: "2 min ago", icon: TriangleAlert },
-    { tone: "warning", title: "Severe storm alert issued for your area", time: "18 min ago", icon: CloudRain },
-  ];
+  const toneFor = (a) => {
+    const sev = (a.severity || "").toLowerCase();
+    return sev === "extreme" || sev === "severe" ? "critical" : "warning";
+  };
 
   return (
     <div role="dialog" aria-modal="true" aria-label="Active alerts" style={{ position: "fixed", inset: 0, zIndex: 10000, display: "flex", justifyContent: "flex-end" }}>
@@ -406,11 +459,19 @@ export function AlertDrawer({ open, onClose }) {
           </Button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {alerts.map((a) => {
-            const Icon = a.icon;
-            const tc = a.tone === "critical" ? C.red : C.amber;
+          {loading && (
+            <div style={{ fontSize: 13, color: C.textFaint, textAlign: "center", padding: 24 }}>Loading alerts...</div>
+          )}
+          {!loading && alerts.length === 0 && (
+            <div style={{ fontSize: 13, color: C.textFaint, textAlign: "center", padding: 24, lineHeight: 1.6 }}>
+              {error || "No active alerts for your area."}
+            </div>
+          )}
+          {alerts.map((a, i) => {
+            const tone = toneFor(a);
+            const tc = tone === "critical" ? C.red : C.amber;
             return (
-              <div key={a.title} style={{
+              <div key={a.id || `alert-${i}`} style={{
                 display: "flex", gap: 14, alignItems: "flex-start",
                 background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 12,
                 padding: 16,
@@ -420,11 +481,11 @@ export function AlertDrawer({ open, onClose }) {
                   background: `${tc}22`, display: "flex", alignItems: "center", justifyContent: "center",
                   flexShrink: 0,
                 }}>
-                  <Icon size={18} color={tc} aria-hidden />
+                  <AlertTriangle size={18} color={tc} aria-hidden />
                 </div>
-                <div>
-                  <div style={{ fontSize: 15, color: C.text, fontWeight: 600, lineHeight: 1.4 }}>{a.title}</div>
-                  <div className="mono meta" style={{ marginTop: 6 }}>{a.time}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, color: C.text, fontWeight: 600, lineHeight: 1.4 }}>{a.headline || a.type || "Weather alert"}</div>
+                  {a.areaDesc && <div className="mono meta" style={{ marginTop: 6 }}>{a.areaDesc}</div>}
                 </div>
               </div>
             );

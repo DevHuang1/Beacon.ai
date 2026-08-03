@@ -33,10 +33,12 @@ export default async function handler(req, res) {
       return {
         latitude: parseFloat(parts[0] || 0),
         longitude: parseFloat(parts[1] || 0),
-        intensity: Math.min(parseFloat(parts[8] || 0) / 100, 1) || 0.3,
-        frp: parseFloat(parts[8] || 0),
+        intensity: Math.min(parseFloat(parts[12] || 0) / 100, 1) || 0.3,
+        frp: parseFloat(parts[12] || 0),
         acq_date: parts[5] || "",
-        satellite: parts[3] || "",
+        acq_time: parts[6] || "",
+        satellite: parts[7] || "",
+        confidence: parseFloat(parts[9] || 0),
       };
     });
 

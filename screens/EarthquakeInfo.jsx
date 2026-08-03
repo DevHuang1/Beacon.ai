@@ -1,21 +1,12 @@
 import React, { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { PageHeader, Panel, Button } from "../components";
 import MapFrame from "../components/MapFrameWrapper";
-import { Activity, Satellite, ToggleLeft, ToggleRight, MapPin, Clock, ExternalLink, CheckCircle2, Phone } from "lucide-react";
-import { C, S, fontDisplay, fontMono } from "../lib/theme";
+import { Activity, Satellite, ToggleLeft, ToggleRight, Clock, ExternalLink, CheckCircle2, Phone } from "lucide-react";
+import { C, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
 
-function makeDamageGeojson() {
-  const centerLon = -124.16, centerLat = 40.8;
-  return {
-    type: "FeatureCollection",
-    features: [
-      { type: "Feature", properties: { type: "new_construction", label: "New construction" }, geometry: { type: "Polygon", coordinates: [[[centerLon - 0.03, centerLat - 0.02], [centerLon + 0.01, centerLat - 0.03], [centerLon + 0.02, centerLat + 0.01], [centerLon - 0.01, centerLat + 0.02], [centerLon - 0.03, centerLat - 0.02]]] } },
-      { type: "Feature", properties: { type: "deforestation", label: "Deforestation" }, geometry: { type: "Polygon", coordinates: [[[centerLon + 0.02, centerLat + 0.01], [centerLon + 0.06, centerLat], [centerLon + 0.07, centerLat + 0.04], [centerLon + 0.03, centerLat + 0.05], [centerLon + 0.02, centerLat + 0.01]]] } },
-      { type: "Feature", properties: { type: "flooding", label: "Flooding" }, geometry: { type: "Polygon", coordinates: [[[centerLon - 0.05, centerLat + 0.03], [centerLon - 0.01, centerLat + 0.02], [centerLon, centerLat + 0.06], [centerLon - 0.04, centerLat + 0.07], [centerLon - 0.05, centerLat + 0.03]]] } },
-    ],
-  };
-}
+const QuakeMapMarkers = dynamic(() => import("./QuakeMapMarkers"), { ssr: false });
 
 const DAMAGE_COLORS = { new_construction: C.amber, deforestation: C.red, flooding: C.blue };
 
@@ -28,6 +19,7 @@ export default function EarthquakeInfo() {
   const [damageMode, setDamageMode] = useState(false);
   const [damageData, setDamageData] = useState(null);
   const [damageLoading, setDamageLoading] = useState(false);
+  const [damageError, setDamageError] = useState(null);
 
   useEffect(() => {
     setLoading(true);
@@ -35,24 +27,33 @@ export default function EarthquakeInfo() {
       if (res?.success && res.data?.events?.length) {
         setQuakes(res.data.events);
       } else {
-        setError(res?.data?.error || "No earthquake data available");
+        setError(res?.error || "No earthquake data available");
       }
     }).catch((err) => setError(err.message)).finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    if (!damageMode || tab !== "recent") { setDamageData(null); return; }
+    if (!damageMode || tab !== "recent") { setDamageData(null); setDamageError(null); return; }
     setDamageLoading(true);
+    setDamageError(null);
     api.geoai.change({ before: {}, after: {} }).then((res) => {
-      if (res?.success) setDamageData(res.data);
-    }).catch(() => {}).finally(() => setDamageLoading(false));
+      if (res?.success) {
+        setDamageData(res.data);
+      } else {
+        setDamageData(null);
+        setDamageError(res?.error || "Damage assessment failed");
+      }
+    }).catch((err) => {
+      setDamageData(null);
+      setDamageError(err.message || "Damage assessment failed");
+    }).finally(() => setDamageLoading(false));
   }, [damageMode, tab]);
 
   const filtered = quakes.filter((e) => e.mag >= minMag);
   const levelColor = { major: C.red, moderate: C.amber, light: C.blue };
   const levelBg = { major: C.redGlow, moderate: C.amberGlow, light: C.blueGlow };
 
-  const damageGeo = damageMode ? makeDamageGeojson() : null;
+  const damageGeo = damageMode && damageData?.type === "FeatureCollection" ? damageData : null;
   const damageStyle = (f) => ({ color: DAMAGE_COLORS[f.properties.type] || C.amber, weight: 2, fillColor: DAMAGE_COLORS[f.properties.type] || C.amber, fillOpacity: 0.15 });
 
   return (
@@ -99,6 +100,15 @@ export default function EarthquakeInfo() {
               </div>
             )}
 
+            {damageMode && (damageLoading || damageError) && (
+              <div style={{ background: C.amberDim, border: `1px solid ${C.amber}55`, borderRadius: 10, padding: "12px 16px", marginBottom: 12, fontSize: 13, color: C.amber, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.amber, flexShrink: 0 }} />
+                {damageLoading
+                  ? "Requesting satellite damage assessment..."
+                  : `Damage assessment requires before/after satellite images — GeoAI service returned: ${damageError}`}
+              </div>
+            )}
+
             {damageData && (
               <div style={{ background: C.amberGlow, border: `1px solid ${C.amber}55`, borderRadius: 10, padding: "12px 16px", marginBottom: 12 }}>
                 <div style={{ fontWeight: 700, fontSize: 14, color: C.amber, marginBottom: 4 }}>Damage assessment</div>
@@ -137,27 +147,18 @@ export default function EarthquakeInfo() {
             </div>
           </div>
 
-          <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14 }}>
+          <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14, position: "relative" }}>
             <MapFrame height={520} geojson={damageGeo} geoStyle={damageStyle}>
-              {filtered.map((e, i) => {
-                const x = 40 + (i * 45) % 340;
-                const y = 40 + ((i * 63) % 260);
-                const r = 6 + e.mag * 2.5;
-                return (
-                  <g key={e.id}>
-                    <circle cx={x} cy={y} r={r} fill={levelColor[e.level]} opacity="0.15" />
-                    <circle cx={x} cy={y} r={7} fill={levelColor[e.level]} stroke={C.bg} strokeWidth="2" />
-                    <text x={x + 12} y={y + 4} fontFamily={fontMono} fontSize="9" fill={C.textFaint}>M{e.mag}</text>
-                  </g>
-                );
-              })}
-              {filtered.length === 0 && !loading && (
-                <text x="200" y="260" fontFamily="'Inter', sans-serif" fontSize="12" fill={C.textFaint} textAnchor="middle" dominantBaseline="middle">No events</text>
-              )}
-              <text x="14" y="24" fontFamily={fontMono} fontSize="10" fill={C.textFaint}>
-                {damageMode ? "Damage assessment overlay · OpenGeoAI" : `${filtered.length} events · USGS`}
-              </text>
+              <QuakeMapMarkers quakes={filtered} />
             </MapFrame>
+            <div style={{
+              position: "absolute", top: 14, left: 14, zIndex: 1000, pointerEvents: "none",
+              background: `${C.panel}DD`, border: `1px solid ${C.line}`, borderRadius: 8,
+              padding: "6px 10px", fontFamily: fontMono, fontSize: 10, color: C.textFaint,
+              backdropFilter: "blur(8px)",
+            }}>
+              {damageMode ? "Damage assessment requires real geometry — none returned" : `${filtered.length} events · USGS`}
+            </div>
           </Panel>
         </div>
       )}

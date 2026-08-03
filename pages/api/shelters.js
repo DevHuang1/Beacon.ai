@@ -27,6 +27,24 @@ function inferFacilities(tags) {
   return Array.from(f);
 }
 
+function inferLabel(tags) {
+  const map = {
+    hospital: "Hospital",
+    fire_station: "Fire Station / Emergency",
+    police: "Police Station",
+    community_centre: "Community Centre",
+    school: "School Shelter",
+    townhall: "Town Hall",
+    place_of_worship: "Place of Worship",
+    sports_centre: "Sports Centre",
+    social_facility: "Social Facility",
+    public_building: "Public Building",
+    church: "Church Shelter",
+    mosque: "Mosque Shelter",
+  };
+  return map[tags.amenity] || map[tags.building] || "Emergency Shelter";
+}
+
 function formatAddress(tags) {
   const parts = [
     tags["addr:housenumber"] || "",
@@ -39,70 +57,123 @@ function formatAddress(tags) {
   return null;
 }
 
+// Small in-memory cache so repeated requests near the same coordinates do not
+// hit the (slow) public Overpass servers every time.
+const OSM_CACHE_TTL_MS = 30 * 60 * 1000;
+const osCache = new Map();
+function cacheKey(lat, lon, radiusMiles) {
+  // Snap to ~0.04° grid (~4 km) so nearby map pans reuse the cached result.
+  // Radius is part of the key because a smaller query returns a subset.
+  return `${Math.round(lat * 25)},${Math.round(lon * 25)},${Math.round(radiusMiles)}`;
+}
+function cacheGet(lat, lon, radiusMiles) {
+  const entry = osCache.get(cacheKey(lat, lon, radiusMiles));
+  if (!entry) return null;
+  if (Date.now() - entry.at > OSM_CACHE_TTL_MS) {
+    osCache.delete(cacheKey(lat, lon, radiusMiles));
+    return null;
+  }
+  return entry.data;
+}
+function cacheSet(lat, lon, radiusMiles, data) {
+  if (osCache.size > 200) osCache.clear();
+  osCache.set(cacheKey(lat, lon, radiusMiles), { at: Date.now(), data });
+}
+
+function firstSuccess(promises) {
+  return new Promise((resolve, reject) => {
+    let pending = promises.length;
+    let settledFails = 0;
+    for (const p of promises) {
+      Promise.resolve(p).then(
+        (value) => resolve(value),
+        () => {
+          settledFails++;
+          if (settledFails === pending) reject(new Error("All Overpass mirrors failed"));
+        }
+      );
+    }
+  });
+}
+
 async function osmQueryOverpass(query) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const endpoints = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+  ];
+
+  // Race all mirrors: the first one that responds wins. Each request is still
+  // bounded by its own timeout so a hung mirror cannot hold the connection pool.
+  const attempts = endpoints.map(async (base) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    try {
+      const url = `${base}?data=${encodeURIComponent(query)}`;
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: { "Accept": "application/json", "User-Agent": "BeaconAI-DisasterApp/1.0" },
+      });
+      if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
+      return await res.json();
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  });
+
   try {
-    const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { "Accept": "application/json" },
-    });
-    clearTimeout(timeoutId);
-    if (!res.ok) return null;
-    return await res.json();
+    const data = await firstSuccess(attempts);
+    if (!data || typeof data.elements === "undefined") return null;
+    return data;
   } catch {
-    clearTimeout(timeoutId);
     return null;
   }
 }
 
-async function fetchRealOsmShelters(userLat, userLon) {
-  const queries = [
-    `
-      [out:json][timeout:8];
-      (
-        node["emergency"~"shelter|disaster_response|assembly_point"](around:16000, ${userLat}, ${userLon});
-        node["amenity"~"community_centre|social_facility|school|townhall|place_of_worship|sports_centre|hospital|fire_station|public_building"](around:16000, ${userLat}, ${userLon});
-      );
-      out body 20;
-    `,
-    `
-      [out:json][timeout:6];
-      (
-        node["building"="school"](around:16000, ${userLat}, ${userLon});
-        node["leisure"="sports_centre"](around:16000, ${userLat}, ${userLon});
-      );
-      out body 10;
-    `,
-  ];
+async function fetchRealOsmShelters(userLat, userLon, radiusMiles = 10) {
+  const cached = cacheGet(userLat, userLon, radiusMiles);
+  if (cached) return cached;
 
-  let elements = [];
-  for (const q of queries) {
-    const data = await osmQueryOverpass(q);
-    if (data && data.elements && data.elements.length > 0) {
-      elements = elements.concat(data.elements);
-    }
+  // Keep the Overpass bounding box proportional to the requested radius so
+  // smaller radius settings return (and compute) much faster. Capped at ~12 km
+  // because `around` scans grow super-linearly (16 km took ~20 s vs ~7 s for
+  // 12 km in testing); larger radii are still handled by the client-side
+  // Haversine filter.
+  const aroundMeters = Math.min(12000, Math.max(2000, Math.round(radiusMiles * 1609.344)));
+
+  // Anchored (^...$) regexes are far faster than substring matching on the
+  // public Overpass mirrors, and the two extra building/leisure clauses were
+  // redundant with the amenity list while nearly tripling query time.
+  const query = `
+    [out:json][timeout:12];
+    (
+      nwr["emergency"~"^(shelter|disaster_response|assembly_point)$"](around:${aroundMeters}, ${userLat}, ${userLon});
+      nwr["amenity"~"^(school|hospital|fire_station|community_centre|place_of_worship|police|townhall|public_building)$"](around:${aroundMeters}, ${userLat}, ${userLon});
+    );
+    out center 30;
+  `;
+
+  const data = await osmQueryOverpass(query);
+  const elements = (data && data.elements) || [];
+
+  if (elements.length === 0) {
+    cacheSet(userLat, userLon, radiusMiles, null);
+    return null;
   }
-
-  if (elements.length === 0) return null;
 
   const seen = new Set();
   const realFacilities = elements
     .filter((el) => {
       if (!el.tags) return false;
-      const name = el.tags["name:en"] || el.tags.name;
-      if (!name) return false;
-      const key = `${el.id || name}`;
+      const key = `${el.type}-${el.id || ""}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     })
-    .slice(0, 15)
     .map((el, idx) => {
-      const rawName = el.tags["name:en"] || el.tags.name;
+      const rawName = el.tags["name:en"] || el.tags.name || inferLabel(el.tags);
       const lat = el.lat || el.center?.lat;
       const lon = el.lon || el.center?.lon;
+      if (!lat || !lon) return null;
       const distMiles = haversineMiles(userLat, userLon, lat, lon);
       const address = formatAddress(el.tags);
       const name = rawName;
@@ -139,16 +210,18 @@ async function fetchRealOsmShelters(userLat, userLon) {
         },
       };
     })
+    .filter(Boolean)
     .sort((a, b) => a.distMiles - b.distMiles);
 
   return realFacilities.length > 0 ? realFacilities : null;
 }
 
 export default async function handler(req, res) {
-  const { id, lat, lon } = req.query;
+  const { id, lat, lon, radius } = req.query;
 
   const userLat = parseFloat(lat);
   const userLon = parseFloat(lon);
+  const radiusMiles = Number.isFinite(parseFloat(radius)) ? Math.min(Math.max(parseFloat(radius), 1), 50) : 10;
 
   if (!userLat || !userLon) {
     return res.status(400).json({
@@ -158,19 +231,7 @@ export default async function handler(req, res) {
     });
   }
 
-  let shelters = await fetchRealOsmShelters(userLat, userLon);
-
-  if (!shelters) {
-    return res.status(200).json({
-      success: true,
-      data: {
-        shelters: [],
-        count: 0,
-        userLocation: { lat: userLat, lon: userLon },
-        note: "No shelter data available from OpenStreetMap for this area. Try expanding your search radius or enabling GPS.",
-      },
-    });
-  }
+  const shelters = (await fetchRealOsmShelters(userLat, userLon, radiusMiles)) || [];
 
   shelters.sort((a, b) => a.distMiles - b.distMiles);
 

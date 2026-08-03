@@ -64,8 +64,13 @@ export function LocationProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    refreshGps();
-  }, [refreshGps]);
+    // Only auto-acquire live GPS on first launch when the user has no saved
+    // location. If a location was saved (Profile > Settings), keep it across
+    // refreshes instead of overwriting it with device GPS.
+    if (!initial) {
+      refreshGps();
+    }
+  }, [initial, refreshGps]);
 
   const latDir = location.lat >= 0 ? "N" : "S";
   const lonDir = location.lon >= 0 ? "E" : "W";
