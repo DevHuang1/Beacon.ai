@@ -6,6 +6,39 @@ import theme, { fontDisplay, fontMono } from "../lib/theme";
 
 const { C } = theme;
 
+// Family test accounts (see accounts.txt) available for one-tap sign-in.
+const QUICK_ACCOUNTS = [
+  { name: "Sitt", role: "Admin", email: "thutasitt@gmail.com", password: "thutasitt" },
+  { name: "Liam", role: "Family Admin", email: "liam.family@gmail.com", password: "LiamFamily@123" },
+  { name: "Maya", role: "Family", email: "maya.family@gmail.com", password: "MayaFamily@123" },
+  { name: "Noah", role: "Family", email: "noah.family@gmail.com", password: "NoahFamily@123" },
+  { name: "Ava", role: "Family", email: "ava.family@gmail.com", password: "AvaFamily@123" },
+];
+
+const QUICK_KEY = "beacon_quick_accounts";
+
+function loadQuickAccounts() {
+  let remembered = [];
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem(QUICK_KEY);
+      if (raw) remembered = JSON.parse(raw);
+    } catch {}
+  }
+  const merged = [...remembered];
+  QUICK_ACCOUNTS.forEach((a) => {
+    if (!merged.some((m) => m.email === a.email)) merged.push(a);
+  });
+  return merged;
+}
+
+function rememberAccount(acct) {
+  try {
+    const prev = loadQuickAccounts().filter((a) => a.email !== acct.email);
+    localStorage.setItem(QUICK_KEY, JSON.stringify([acct, ...prev].slice(0, 8)));
+  } catch {}
+}
+
 export default function AuthPage() {
   const router = useRouter();
   const [mode, setMode] = useState("login");
@@ -14,30 +47,59 @@ export default function AuthPage() {
   const [username, setUsername] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [quickAccount, setQuickAccount] = useState(null);
+  const [quickAccounts] = useState(() => loadQuickAccounts());
+
+  const signIn = async (em, pw) => {
+    setError("");
+    setLoading(true);
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithPassword({ email: em, password: pw });
+    setLoading(false);
+    if (error) {
+      setError(error.message);
+      return false;
+    }
+    return true;
+  };
+
+  const quickLogin = async (acct) => {
+    setQuickAccount(acct.email);
+    setEmail(acct.email);
+    setPassword(acct.password);
+    const ok = await signIn(acct.email, acct.password);
+    if (ok) {
+      rememberAccount(acct);
+      router.push("/");
+    } else {
+      setQuickAccount(null);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    setLoading(true);
-
-    const supabase = createClient();
 
     if (mode === "login") {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setError(error.message);
-      else router.push("/");
+      setLoading(true);
+      const ok = await signIn(email, password);
+      if (ok) {
+        rememberAccount({ name: email.split("@")[0], email, password });
+        router.push("/");
+      }
     } else {
+      setLoading(true);
+      const supabase = createClient();
       const options = {};
       if (username && username.trim().length >= 2) {
         const clean = username.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
         if (clean.length >= 2) options.data = { username: clean, display_name: clean };
       }
       const { error } = await supabase.auth.signUp({ email, password, options });
+      setLoading(false);
       if (error) setError(error.message);
       else setError("Account created! Check your email for the confirmation link.");
     }
-
-    setLoading(false);
   };
 
   const inputStyle = {
@@ -109,6 +171,74 @@ export default function AuthPage() {
                 : "Create an account for your family"}
             </p>
           </div>
+
+          {mode === "login" && quickAccounts.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: C.textFaint,
+                  fontFamily: fontMono,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  marginBottom: 10,
+                  textAlign: "center",
+                }}
+              >
+                Quick sign-in
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {quickAccounts.map((a) => (
+                  <button
+                    key={a.email}
+                    type="button"
+                    onClick={() => quickLogin(a)}
+                    disabled={loading}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      border: `1px solid ${C.line}`,
+                      background: C.bg,
+                      color: C.text,
+                      cursor: loading ? "not-allowed" : "pointer",
+                      fontFamily: fontDisplay,
+                      fontSize: 14,
+                      transition: "all 0.15s",
+                      textAlign: "left",
+                      width: "100%",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.background = `${C.blue}10`; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.line; e.currentTarget.style.background = C.bg; }}
+                  >
+                    <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span
+                        style={{
+                          width: 30, height: 30, borderRadius: 8,
+                          background: C.blueGlow, color: C.blue,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 13, fontWeight: 800,
+                        }}
+                      >
+                        {a.name.charAt(0).toUpperCase()}
+                      </span>
+                      <span>
+                        <span style={{ display: "block", fontWeight: 700, fontSize: 13 }}>{a.name}</span>
+                        <span style={{ display: "block", fontSize: 11, color: C.textFaint }}>{a.email}</span>
+                      </span>
+                    </span>
+                    <span style={{ fontSize: 12, color: quickAccount === a.email ? C.blue : C.textFaint, fontWeight: 700 }}>
+                      {quickAccount === a.email ? "Signing in..." : "Tap to sign in"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div>

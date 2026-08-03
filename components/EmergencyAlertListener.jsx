@@ -1,80 +1,189 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { createClient } from "../lib/supabase-client";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { C } from "../lib/theme";
-import { AlertTriangle, X, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, X, CheckCircle2, ShieldCheck } from "lucide-react";
 import Button from "./Button";
 
-const CHANNEL = "beacon-family-alerts";
-const EVENT = "emergency-alert";
+const SEEN_ALERT_KEY = "beacon_last_seen_alert_id";
+const SEEN_ACK_KEY = "beacon_seen_ack_ids";
+
+function loadKey(key, fallback) {
+  if (typeof window === "undefined") return fallback;
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveKey(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
+function loadAckIds() {
+  const raw = loadKey(SEEN_ACK_KEY, "[]");
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? new Set(arr) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveAckIds(set) {
+  saveKey(SEEN_ACK_KEY, JSON.stringify(Array.from(set)));
+}
 
 /**
- * Listens for realtime emergency alerts targeted at the current user and shows
- * a prominent popup when one arrives — regardless of which screen is open.
+ * Polls the alerts API for two things:
+ *  1. New emergency alerts addressed to the current user -> large red popup.
+ *  2. Alerts the current user sent that the recipient acknowledged -> "I am
+ *     safe" popup back to the alerter.
  */
 export default function EmergencyAlertListener() {
-  const [userId, setUserId] = useState(null);
-  const [alert, setAlert] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [incoming, setIncoming] = useState(null);
+  const [safe, setSafe] = useState(null);
+  const seenIncomingRef = useRef(null);
+  const seenAckRef = useRef(null);
 
   useEffect(() => {
-    fetch("/api/auth/session")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d?.user?.id) setUserId(d.user.id);
-      })
-      .catch(() => {});
+    seenIncomingRef.current = loadKey(SEEN_ALERT_KEY, null);
+    seenAckRef.current = loadAckIds();
+    setLoaded(true);
   }, []);
 
   useEffect(() => {
-    if (!userId) return;
-    const supabase = createClient();
-    const channel = supabase.channel(CHANNEL);
-    channel
-      .on("broadcast", { event: EVENT }, (payload) => {
-        const p = payload?.payload || {};
-        if (p.recipient_id && p.recipient_id !== userId) return;
-        setAlert({ ...p, id: Date.now() });
-      })
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
+    if (!loaded) return;
+
+    const pollIncoming = async () => {
+      try {
+        const res = await fetch("/api/profiles/alert");
+        const d = await res.json();
+        if (d?.success !== true || !Array.isArray(d.data) || d.data.length === 0) return;
+        const newest = d.data[0];
+        if (newest.id === seenIncomingRef.current) return;
+        if (seenIncomingRef.current == null) {
+          seenIncomingRef.current = newest.id;
+          saveKey(SEEN_ALERT_KEY, newest.id);
+          return;
+        }
+        seenIncomingRef.current = newest.id;
+        saveKey(SEEN_ALERT_KEY, newest.id);
+        setIncoming({
+          id: newest.id,
+          sender_name: newest.sender_name || "A family member",
+          message: newest.message,
+        });
+      } catch {}
     };
-  }, [userId]);
 
-  const dismiss = useCallback(() => setAlert(null), []);
+    const pollAcks = async () => {
+      try {
+        const res = await fetch("/api/profiles/alert?sent=1");
+        const d = await res.json();
+        if (d?.success !== true || !Array.isArray(d.data) || d.data.length === 0) return;
+        const fresh = d.data.filter((a) => !seenAckRef.current.has(a.id));
+        if (fresh.length === 0) return;
+        fresh.forEach((a) => seenAckRef.current.add(a.id));
+        saveAckIds(seenAckRef.current);
+        setSafe({
+          id: fresh[0].id,
+          recipient_name: fresh[0].recipient_name || "A family member",
+          message: fresh[0].message,
+        });
+      } catch {}
+    };
 
-  if (!alert) return null;
+    pollIncoming();
+    pollAcks();
+    const iv = setInterval(() => {
+      pollIncoming();
+      pollAcks();
+    }, 5000);
+    return () => clearInterval(iv);
+  }, [loaded]);
+
+  const acknowledge = useCallback(async (alertId) => {
+    try {
+      await fetch("/api/profiles/acknowledge-alert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: alertId }),
+      });
+    } catch {}
+    setIncoming(null);
+  }, []);
+
+  const backdrop = {
+    position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.65)",
+    display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+  };
 
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.55)",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-    }}>
-      <div style={{
-        maxWidth: 420, width: "100%", background: C.panel,
-        border: `2px solid ${C.red}`, borderRadius: 16, padding: 24,
-        boxShadow: "0 20px 60px rgba(0,0,0,0.5)", animation: "fadeInUp 0.25s ease",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.red, fontWeight: 800, fontSize: 16 }}>
-            <AlertTriangle size={20} /> EMERGENCY ALERT
+    <>
+      {incoming && (
+        <div style={backdrop}>
+          <div style={{
+            width: "100%", maxWidth: 720, background: C.panel,
+            border: `3px solid ${C.red}`, borderRadius: 20, padding: "36px 40px",
+            boxShadow: "0 30px 80px rgba(0,0,0,0.6)", animation: "fadeInUp 0.25s ease",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, color: C.red, fontWeight: 900, fontSize: 24 }}>
+                <AlertTriangle size={32} /> EMERGENCY ALERT
+              </div>
+              <button onClick={() => setIncoming(null)} aria-label="Dismiss alert" style={{ background: "transparent", border: "none", cursor: "pointer", color: C.textDim }}>
+                <X size={24} />
+              </button>
+            </div>
+            <div style={{ fontSize: 15, color: C.textDim, marginBottom: 10 }}>
+              From <strong style={{ color: C.text }}>{incoming.sender_name}</strong>
+            </div>
+            <div style={{ fontSize: 18, color: C.text, lineHeight: 1.7, marginBottom: 28, whiteSpace: "pre-line" }}>
+              {incoming.message}
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <Button variant="success" onClick={() => acknowledge(incoming.id)} style={{ flex: 1, minWidth: 200, padding: "14px", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontSize: 15, fontWeight: 800 }}>
+                <ShieldCheck size={20} /> I&apos;m safe
+              </Button>
+              <Button variant="secondary" onClick={() => setIncoming(null)} style={{ padding: "14px 24px", fontSize: 14, fontWeight: 700 }}>
+                Dismiss
+              </Button>
+            </div>
           </div>
-          <button onClick={dismiss} aria-label="Dismiss alert" style={{ background: "transparent", border: "none", cursor: "pointer", color: C.textDim }}>
-            <X size={18} />
-          </button>
         </div>
-        <div style={{ fontSize: 13, color: C.textDim, marginBottom: 6 }}>
-          From <strong style={{ color: C.text }}>{alert.sender_name || "A family member"}</strong>
-          {alert.recipient_name ? ` for ${alert.recipient_name}` : ""}
+      )}
+
+      {safe && (
+        <div style={backdrop}>
+          <div style={{
+            width: "100%", maxWidth: 720, background: C.panel,
+            border: `3px solid ${C.teal}`, borderRadius: 20, padding: "36px 40px",
+            boxShadow: "0 30px 80px rgba(0,0,0,0.6)", animation: "fadeInUp 0.25s ease",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, color: C.teal, fontWeight: 900, fontSize: 24 }}>
+                <CheckCircle2 size={32} /> I&apos;M SAFE
+              </div>
+              <button onClick={() => setSafe(null)} aria-label="Dismiss" style={{ background: "transparent", border: "none", cursor: "pointer", color: C.textDim }}>
+                <X size={24} />
+              </button>
+            </div>
+            <div style={{ fontSize: 18, color: C.text, lineHeight: 1.7, marginBottom: 12 }}>
+              <strong style={{ color: C.teal }}>{safe.recipient_name}</strong> responded{" "}
+              <strong>&quot;I&apos;m safe&quot;</strong> to your emergency alert.
+            </div>
+            <div style={{ fontSize: 14, color: C.textDim, whiteSpace: "pre-line", marginBottom: 24, padding: "12px 16px", background: `${C.teal}10`, borderRadius: 10, border: `1px solid ${C.teal}33` }}>
+              {safe.message}
+            </div>
+            <Button variant="success" onClick={() => setSafe(null)} style={{ width: "100%", padding: "14px", fontSize: 15, fontWeight: 800 }}>
+              Got it
+            </Button>
+          </div>
         </div>
-        <div style={{ fontSize: 14, color: C.text, lineHeight: 1.6, marginBottom: 16, whiteSpace: "pre-line" }}>
-          {alert.message}
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Button variant="success" onClick={dismiss} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-            <CheckCircle2 size={15} /> I&apos;m safe / Acknowledge
-          </Button>
-        </div>
-      </div>
-    </div>
+      )}
+    </>
   );
 }
