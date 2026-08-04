@@ -64,11 +64,6 @@ export default function EmergencyAlertListener() {
         if (d?.success !== true || !Array.isArray(d.data) || d.data.length === 0) return;
         const newest = d.data[0];
         if (newest.id === seenIncomingRef.current) return;
-        if (seenIncomingRef.current == null) {
-          seenIncomingRef.current = newest.id;
-          saveKey(SEEN_ALERT_KEY, newest.id);
-          return;
-        }
         seenIncomingRef.current = newest.id;
         saveKey(SEEN_ALERT_KEY, newest.id);
         setIncoming({

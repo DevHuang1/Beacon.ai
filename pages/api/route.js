@@ -3,7 +3,7 @@ import { fetchWithTimeout } from "../../lib/api-utils";
 const OSRM_BASE = "https://router.project-osrm.org/route/v1";
 
 export default async function handler(req, res) {
-  const { origin, destination, profile = "driving" } = req.query;
+  const { origin, destination, profile = "driving", via } = req.query;
 
   if (!origin || !destination) {
     return res.status(400).json({ success: false, error: "origin and destination required (lat,lon)" });
@@ -12,7 +12,8 @@ export default async function handler(req, res) {
   const validProfiles = ["driving", "walking", "cycling"];
   const p = validProfiles.includes(profile) ? profile : "driving";
 
-  const url = `${OSRM_BASE}/${p}/${origin};${destination}?geometries=geojson&steps=true&overview=full&annotations=true&alternatives=3`;
+  const waypoints = via ? `${origin};${via};${destination}` : `${origin};${destination}`;
+  const url = `${OSRM_BASE}/${p}/${waypoints}?geometries=geojson&steps=true&overview=full&annotations=true&alternatives=3`;
 
   try {
     const result = await fetchWithTimeout(url, { headers: {} }, 10000);

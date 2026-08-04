@@ -5,12 +5,14 @@ import MapFrame from "../components/MapFrameWrapper";
 import { Activity, Satellite, ToggleLeft, ToggleRight, Clock, ExternalLink, CheckCircle2, Phone } from "lucide-react";
 import { C, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
+import { useLocation } from "../lib/LocationContext";
 
 const QuakeMapMarkers = dynamic(() => import("./QuakeMapMarkers"), { ssr: false });
 
 const DAMAGE_COLORS = { new_construction: C.amber, deforestation: C.red, flooding: C.blue };
 
 export default function EarthquakeInfo() {
+  const loc = useLocation();
   const [minMag, setMinMag] = useState(0);
   const [tab, setTab] = useState("recent");
   const [quakes, setQuakes] = useState([]);
@@ -23,14 +25,17 @@ export default function EarthquakeInfo() {
 
   useEffect(() => {
     setLoading(true);
-    api.earthquake.recent().then((res) => {
-      if (res?.success && res.data?.events?.length) {
-        setQuakes(res.data.events);
+    setError(null);
+    api.earthquake.recent(0, 24, loc.lat, loc.lon).then((res) => {
+      if (res?.success) {
+        setQuakes(res.data?.events || []);
+        setError(null);
       } else {
-        setError(res?.error || "No earthquake data available");
+        setQuakes([]);
+        setError(res?.error || "Failed to load earthquake data");
       }
     }).catch((err) => setError(err.message)).finally(() => setLoading(false));
-  }, []);
+  }, [loc.lat, loc.lon]);
 
   useEffect(() => {
     if (!damageMode || tab !== "recent") { setDamageData(null); setDamageError(null); return; }
@@ -130,7 +135,9 @@ export default function EarthquakeInfo() {
                 <div key={i} className="skeleton" style={{ height: 68, borderRadius: 10 }} />
               ))}
               {!loading && filtered.length === 0 && (
-                <div style={{ color: C.textFaint, fontSize: 14, textAlign: "center", padding: 30 }}>No events at this magnitude.</div>
+                <div style={{ color: C.textFaint, fontSize: 14, textAlign: "center", padding: 30 }}>
+                  No earthquakes recorded near you in the last 24 hours.
+                </div>
               )}
               {filtered.map((e, i) => (
                 <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 14, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 16px", animation: `slideUp 0.25s ease ${i * 0.05}s both`, transition: "border-color 0.15s" }}>

@@ -25,16 +25,16 @@ export default async function handler(req, res) {
 
     const degLat = rKm / 110.574;
     const degLon = rKm / (111.32 * Math.max(Math.cos((rLat * Math.PI) / 180), 0.01));
-    const minLat = rLat - degLat;
-    const maxLat = rLat + degLat;
-    const minLon = rLon - degLon;
-    const maxLon = rLon + degLon;
+    const minLat = (rLat - degLat).toFixed(6);
+    const maxLat = (rLat + degLat).toFixed(6);
+    const minLon = (rLon - degLon).toFixed(6);
+    const maxLon = (rLon + degLon).toFixed(6);
 
     const ivUrl =
       `https://waterservices.usgs.gov/nwis/iv/?format=json&period=P3D` +
       `&bBox=${minLon},${minLat},${maxLon},${maxLat}` +
       `&parameterCd=00060,00065&siteStatus=active`;
-    const ivRes = await fetchWithTimeout(ivUrl, {}, 15000);
+    const ivRes = await fetchWithTimeout(ivUrl, {}, 30000);
     if (!ivRes.ok) throw new Error(`USGS returned ${ivRes.status}`);
 
     const json = await ivRes.json();
@@ -87,25 +87,38 @@ export default async function handler(req, res) {
       }
     }
 
-    const stations = Object.values(bySite).map((s) => {
-      const levelPts = s.levelPoints || [];
-      const ptsForTrend = levelPts.length >= 2 ? levelPts : s.dischargePoints || [];
-      const trend = computeTrend(ptsForTrend);
-      const rate_mph = levelPts.length >= 2
-        ? (levelPts[levelPts.length - 1].v - levelPts[0].v) * FT_TO_M
-        : 0;
-      const level_m = s.level_m || 0;
-      return {
-        name: s.name,
-        level_m: Number(level_m.toFixed(2)),
-        rate_mph: Number(rate_mph.toFixed(3)),
-        discharge_cfs: s.discharge ? Number(s.discharge.toFixed(1)) : null,
-        trend,
-        risk: level_m > 4 ? "high" : level_m > 3 ? "moderate" : "low",
-        latitude: s.lat,
-        longitude: s.lon,
-      };
-    });
+    const distKm = (aLat, aLon) => {
+      const dLat = ((aLat - rLat) * Math.PI) / 180;
+      const dLon = ((aLon - rLon) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((rLat * Math.PI) / 180) * Math.cos((aLat * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+      return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    };
+
+    const stations = Object.values(bySite)
+      .map((s) => {
+        const levelPts = s.levelPoints || [];
+        const ptsForTrend = levelPts.length >= 2 ? levelPts : s.dischargePoints || [];
+        const trend = computeTrend(ptsForTrend);
+        const rate_mph = levelPts.length >= 2
+          ? (levelPts[levelPts.length - 1].v - levelPts[0].v) * FT_TO_M
+          : 0;
+        const level_m = s.level_m || 0;
+        return {
+          name: s.name,
+          level_m: Number(level_m.toFixed(2)),
+          rate_mph: Number(rate_mph.toFixed(3)),
+          discharge_cfs: s.discharge ? Number(s.discharge.toFixed(1)) : null,
+          trend,
+          risk: level_m > 4 ? "high" : level_m > 3 ? "moderate" : "low",
+          latitude: s.lat,
+          longitude: s.lon,
+        };
+      })
+      .filter((s) => Number.isFinite(s.latitude) && Number.isFinite(s.longitude))
+      .sort((a, b) => distKm(a.latitude, a.longitude) - distKm(b.latitude, b.longitude))
+      .slice(0, 6);
 
     const riskZones = stations.map((s) => ({
       name: s.name,

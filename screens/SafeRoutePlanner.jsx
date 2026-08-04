@@ -12,6 +12,7 @@ import routeService from "../lib/services/routeService";
 import { api } from "../lib/api";
 import { calculateHaversineMiles } from "../lib/haversine";
 import { useLocation } from "../lib/LocationContext";
+import { sendEmergencyAlert } from "../lib/emergencyAlerts";
 
 const EscapeMapOverlay = dynamic(() => import("../components/EscapeMapOverlay"), { ssr: false });
 
@@ -51,6 +52,98 @@ function isShelterInDanger(shelter, circles) {
     if (dist < (d.radiusMiles || DANGER_RADIUS_MILES)) return true;
   }
   return false;
+}
+
+function dangerOverlap(coords, circles) {
+  if (!coords || coords.length === 0 || !circles || circles.length === 0) return 0;
+  const stride = Math.max(1, Math.floor(coords.length / 300));
+  let count = 0;
+  for (let i = 0; i < coords.length; i += stride) {
+    const [lon, lat] = coords[i];
+    for (const d of circles) {
+      if (calculateHaversineMiles(lat, lon, d.lat, d.lon) < (d.radiusMiles || DANGER_RADIUS_MILES)) count++;
+    }
+  }
+  return count;
+}
+
+function routeCrossesDanger(coords, circles) {
+  return dangerOverlap(coords, circles) > 0;
+}
+
+function findDangerZoneEntryExit(routeCoords, circle) {
+  if (!routeCoords || routeCoords.length < 2 || !circle) return null;
+  const radiusMiles = circle.radiusMiles || DANGER_RADIUS_MILES;
+  let entryIdx = -1;
+  let exitIdx = -1;
+  for (let i = 0; i < routeCoords.length; i++) {
+    const [lon, lat] = routeCoords[i];
+    const dist = calculateHaversineMiles(lat, lon, circle.lat, circle.lon);
+    const inDanger = dist < radiusMiles;
+    if (inDanger && entryIdx === -1) {
+      entryIdx = i;
+    } else if (!inDanger && entryIdx !== -1 && exitIdx === -1) {
+      exitIdx = i;
+      break;
+    }
+  }
+  if (entryIdx === -1) return null;
+  if (exitIdx === -1) exitIdx = routeCoords.length - 1;
+  return { entryIdx, exitIdx };
+}
+
+function generateDetourWaypoints(circle, routeCoords) {
+  if (!circle || !routeCoords || routeCoords.length < 2) return [];
+  const waypoints = [];
+  const radiusMiles = circle.radiusMiles || DANGER_RADIUS_MILES;
+
+  const zone = findDangerZoneEntryExit(routeCoords, circle);
+  let midIdx;
+  if (zone) {
+    midIdx = Math.floor((zone.entryIdx + zone.exitIdx) / 2);
+  } else {
+    let bestDist = Infinity;
+    midIdx = 0;
+    for (let i = 0; i < routeCoords.length; i++) {
+      const [lon, lat] = routeCoords[i];
+      const d = calculateHaversineMiles(lat, lon, circle.lat, circle.lon);
+      if (d < bestDist) { bestDist = d; midIdx = i; }
+    }
+  }
+
+  const ci = Math.min(routeCoords.length - 1, Math.max(1, midIdx));
+  const p0 = routeCoords[ci - 1];
+  const p1 = routeCoords[Math.min(routeCoords.length - 1, ci + 1)];
+  const dLonDeg = p1[0] - p0[0];
+  const dLatDeg = p1[1] - p0[1];
+  const len = Math.hypot(dLonDeg, dLatDeg);
+  if (len === 0) return [];
+  const perpLon = dLatDeg / len;
+  const perpLat = -dLonDeg / len;
+  const distToCenter = calculateHaversineMiles(routeCoords[ci][1], routeCoords[ci][0], circle.lat, circle.lon);
+  const clearanceMeters = (distToCenter + radiusMiles) * 1609 + 30;
+  for (const side of [1, -1]) {
+    for (const scale of [1.0, 1.2, 1.5]) {
+      const offsetMeters = clearanceMeters * scale;
+      const mLat = offsetMeters / 111320;
+      const mLon = offsetMeters / (111320 * Math.cos((routeCoords[ci][1] * Math.PI) / 180));
+      waypoints.push({
+        lat: routeCoords[ci][1] + perpLat * side * mLat,
+        lon: routeCoords[ci][0] + perpLon * side * mLon,
+      });
+    }
+  }
+  return waypoints;
+}
+
+function calcRouteLengthKm(route) {
+  if (!route?.geometry?.coordinates) return Infinity;
+  const coords = route.geometry.coordinates;
+  let total = 0;
+  for (let i = 1; i < coords.length; i++) {
+    total += calculateHaversineMiles(coords[i - 1][1], coords[i - 1][0], coords[i][1], coords[i][0]);
+  }
+  return total * 1.60934;
 }
 
 function getSafetyScore(shelter, dangerCircles) {
@@ -102,9 +195,23 @@ export default function SafeRoutePlanner() {
   const [weatherUnavailable, setWeatherUnavailable] = useState(false);
   const [routeAnimKey, setRouteAnimKey] = useState(0);
 
+  const [evacuating, setEvacuating] = useState(false);
+  const [evacProgress, setEvacProgress] = useState(0);
+  const [evacEtaMin, setEvacEtaMin] = useState(null);
+  const [evacArrived, setEvacArrived] = useState(false);
+  const evacIntervalRef = useRef(null);
+  const evacStartRef = useRef(0);
+  const evacStepRef = useRef(0);
+  const evacRouteCoordsRef = useRef([]);
+
   const simIntervalRef = useRef(null);
   const aiIntervalRef = useRef(null);
   const aiStepRef = useRef(0);
+
+  const recommendedRef = useRef(null);
+  recommendedRef.current = recommended;
+  const routeInfoRef = useRef(null);
+  routeInfoRef.current = routeInfo;
 
   const applyScan = useCallback((d) => {
     setUserCoords(d.userCoords);
@@ -132,6 +239,7 @@ export default function SafeRoutePlanner() {
     return () => {
       if (simIntervalRef.current) clearInterval(simIntervalRef.current);
       if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
+      if (evacIntervalRef.current) clearInterval(evacIntervalRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loc.lat, loc.lon]);
@@ -305,7 +413,27 @@ export default function SafeRoutePlanner() {
     setRouteGeojson(buildAlternativesGeojson(target, routeAlternatives));
   }
 
-  async function calculateRoute(origin, destination, circles) {
+  function applyRoutes(routes, circles) {
+    const safeRoute = routeService.pickSafestRoute(routes, circles);
+    if (!safeRoute) {
+      setNoSafeRoute(true);
+      setRouteInfo(null);
+      return null;
+    }
+    const result = {
+      routeAlternatives: routes,
+      routeInfo: safeRoute,
+      routeGeojson: buildAlternativesGeojson(safeRoute, routes),
+      noSafeRoute: false,
+    };
+    setRouteAlternatives(result.routeAlternatives);
+    setRouteInfo(safeRoute);
+    setRouteGeojson(result.routeGeojson);
+    setRouteAnimKey((k) => k + 1);
+    return result;
+  }
+
+  async function calculateRoute(origin, destination, circles, via = null) {
     if (!origin || !destination) return { routeInfo: null, routeAlternatives: [], routeGeojson: null, noSafeRoute: true };
     setRouteLoading(true);
     setNoSafeRoute(false);
@@ -313,30 +441,62 @@ export default function SafeRoutePlanner() {
 
     let result = { routeInfo: null, routeAlternatives: [], routeGeojson: null, noSafeRoute: true };
 
-    const routeRes = await routeService.calculateEvacuationRoute(origin, destination, "driving");
+    const routeRes = await routeService.calculateEvacuationRoute(origin, destination, "driving", via);
     if (routeRes.success && routeRes.routes) {
-      const safeRoute = routeService.pickSafestRoute(routeRes.routes, circles);
-      if (safeRoute) {
-        result = {
-          routeAlternatives: routeRes.routes,
-          routeInfo: safeRoute,
-          routeGeojson: buildAlternativesGeojson(safeRoute, routeRes.routes),
-          noSafeRoute: false,
-        };
-        setRouteAlternatives(result.routeAlternatives);
-        setRouteInfo(safeRoute);
-        setRouteGeojson(result.routeGeojson);
-        setRouteAnimKey((k) => k + 1);
-      } else {
-        setNoSafeRoute(true);
-        setRouteInfo(null);
-      }
+      result = applyRoutes(routeRes.routes, circles) || result;
     } else {
       setNoSafeRoute(true);
       setRouteInfo(null);
     }
     setRouteLoading(false);
     return result;
+  }
+
+  async function rerouteAroundDetour(blockCircle, origin, destination) {
+    const baseCoords = routeInfoRef.current?.geometry?.coordinates || [];
+    const baseLength = calcRouteLengthKm(routeInfoRef.current);
+
+    const directRes = await routeService.calculateEvacuationRoute(origin, destination, "driving", null);
+    if (directRes.success && directRes.routes) {
+      let best = null;
+      for (const route of directRes.routes) {
+        if (route.geometry && routeCrossesDanger(route.geometry.coordinates, [blockCircle])) continue;
+        const duration = Number(route.duration_min) || Infinity;
+        const length = calcRouteLengthKm(route);
+        const cost = duration;
+        if (!best || cost < best.cost) {
+          best = { cost, routes: [route], extraLength: Math.max(0, length - baseLength) };
+        }
+      }
+      if (best) return best;
+    }
+
+    const waypoints = generateDetourWaypoints(blockCircle, baseCoords);
+    let best = null;
+    const batchSize = 5;
+    for (let i = 0; i < waypoints.length; i += batchSize) {
+      const batch = waypoints.slice(i, i + batchSize);
+      const results = await Promise.all(
+        batch.map((via) => routeService.calculateEvacuationRoute(origin, destination, "driving", via))
+      );
+      for (const res of results) {
+        if (!res.success || !res.routes || res.routes.length === 0) continue;
+        for (const route of res.routes) {
+          if (route.geometry && routeCrossesDanger(route.geometry.coordinates, [blockCircle])) continue;
+          const duration = Number(route.duration_min) || Infinity;
+          const length = calcRouteLengthKm(route);
+          const cost = duration;
+          if (!best || cost < best.cost) {
+            best = { cost, routes: [route], extraLength: Math.max(0, length - baseLength) };
+          }
+        }
+      }
+      if (best) break;
+    }
+    if (best && best.routes.length > 0) {
+      best.routeInfo = best.routes[0];
+    }
+    return best;
   }
 
   const handleShelterSelect = useCallback(async (s) => {
@@ -352,8 +512,22 @@ export default function SafeRoutePlanner() {
     if (!userCoords) return;
 
     const severity = SEVERITY_LEVELS[Math.floor(Math.random() * SEVERITY_LEVELS.length)];
-    const pos = generateCoordsNearby(userCoords.lat, userCoords.lon);
     const dt = DISASTER_TYPES.find((d) => d.id === type) || DISASTER_TYPES[0];
+
+    // Spawn the disaster ON the current escape route so it actually blocks it
+    // and forces a reroute. Falls back to a random spot near the user if there
+    // is no route yet.
+    const routeCoords = routeInfoRef.current?.geometry?.coordinates;
+    let pos;
+    if (routeCoords && routeCoords.length >= 3) {
+      const start = Math.floor(routeCoords.length * 0.3);
+      const end = Math.floor(routeCoords.length * 0.7);
+      const idx = start + Math.floor(Math.random() * Math.max(1, end - start));
+      const [lon, lat] = routeCoords[idx];
+      pos = { lat, lon };
+    } else {
+      pos = generateCoordsNearby(userCoords.lat, userCoords.lon);
+    }
 
     const sim = {
       type,
@@ -390,7 +564,7 @@ export default function SafeRoutePlanner() {
     let step = 0;
     simIntervalRef.current = setInterval(() => {
       step += 1;
-      const newRadius = Math.min(200 + step * 30, 800);
+      const newRadius = Math.min(200 + step * 60, 800);
       setSimRadius(newRadius);
       setSimulation((prev) => ({ ...prev, currentRadius: newRadius }));
       setDangerCircles((prev) => {
@@ -400,38 +574,143 @@ export default function SafeRoutePlanner() {
             : d
         );
         if (step % 2 === 0) {
-          setTimeout(() => {
-            setRecommended((current) => {
-              if (!current) return current;
-              const nextSafe = recheckShelterSafety(current, shelters, updated, userCoords);
-              if (nextSafe && nextSafe.id !== current.id) {
+          const curRoute = routeInfoRef.current;
+          const crossDanger = curRoute?.geometry?.coordinates
+            ? routeCrossesDanger(curRoute.geometry.coordinates, updated)
+            : false;
+          if (crossDanger) {
+            const target = recommendedRef.current;
+            if (!target) return updated;
+            const simCircle = updated.find((d) => d.key === sim.key);
+            if (simCircle) {
+              rerouteAroundDetour(simCircle, userCoords, target).then((detour) => {
+                if (detour) {
+                  applyRoutes(detour.routes, updated);
+                } else {
+                  const nextSafe = findNearestSafeShelter(shelters, updated, userCoords);
+                  if (nextSafe && nextSafe.id !== target.id) {
+                    setRecommended(nextSafe);
+                    calculateRoute(userCoords, nextSafe, updated);
+                  } else {
+                    setNoSafeRoute(true);
+                  }
+                }
+              });
+            }
+          } else {
+            const target = recommendedRef.current;
+            if (target) {
+              const nextSafe = recheckShelterSafety(target, shelters, updated, userCoords);
+              if (nextSafe && nextSafe.id !== target.id) {
                 setRecommended(nextSafe);
                 calculateRoute(userCoords, nextSafe, updated);
               } else if (!nextSafe) {
                 setNoSafeRoute(true);
               }
-              return nextSafe || current;
-            });
-          }, 0);
+            }
+          }
         }
         return updated;
       });
       if (newRadius >= 800) {
         clearInterval(simIntervalRef.current);
       }
-    }, 800);
+    }, 500);
 
-    setTimeout(() => {
-      if (recommended) {
+    setTimeout(async () => {
+      if (!recommended) return;
+      const simCircle = newCircles.find((c) => c.key === sim.key);
+      const curCoords = routeInfoRef.current?.geometry?.coordinates;
+      if (simCircle && curCoords && routeCrossesDanger(curCoords, [simCircle])) {
+        const detour = await rerouteAroundDetour(simCircle, userCoords, recommended);
+        if (detour) {
+          applyRoutes(detour.routes, newCircles);
+        } else {
+          calculateRoute(userCoords, recommended, [...newCircles]);
+        }
+      } else {
         calculateRoute(userCoords, recommended, [...newCircles]);
       }
-    }, 500);
+    }, 100);
   }
 
   function startRandomSimulation() {
     const types = DISASTER_TYPES.map((d) => d.id);
     const randomType = types[Math.floor(Math.random() * types.length)];
     startSimulation(randomType);
+  }
+
+  function notifyFamilyEvacuation() {
+    const target = recommended?.name || "the nearest safe shelter";
+    fetch("/api/profiles/family")
+      .then((r) => r.json())
+      .then((d) => {
+        const members = Array.isArray(d?.data?.members) ? d.data.members : [];
+        members.forEach((m) => {
+          sendEmergencyAlert({
+            recipientId: m.family_member_id,
+            message: `🚨 Emergency evacuation started toward ${target}. Follow the safe route to safety.`,
+          }).catch(() => {});
+        });
+      })
+      .catch(() => {});
+  }
+
+  function stopEvacuation(arrived = false) {
+    if (evacIntervalRef.current) {
+      clearInterval(evacIntervalRef.current);
+      evacIntervalRef.current = null;
+    }
+    setEvacuating(false);
+    if (arrived) {
+      setEvacArrived(true);
+      setEvacProgress(100);
+    }
+  }
+
+  function startEvacuation() {
+    if (evacuating) {
+      stopEvacuation();
+      return;
+    }
+    if (!routeInfo || !recommended || !userCoords) return;
+    const coords = routeInfo.geometry?.coordinates || [];
+    if (coords.length < 2) return;
+
+    evacStartRef.current = Date.now();
+    evacStepRef.current = 0;
+    evacRouteCoordsRef.current = coords;
+    setEvacuating(true);
+    setEvacProgress(0);
+    setEvacArrived(false);
+    setEvacEtaMin(routeInfo.duration_min || null);
+
+    notifyFamilyEvacuation();
+
+    const totalSteps = Math.min(coords.length - 1, 140);
+    evacIntervalRef.current = setInterval(() => {
+      const idx = Math.min(
+        Math.round((evacStepRef.current / totalSteps) * (coords.length - 1)),
+        coords.length - 1
+      );
+      const [lon, lat] = coords[idx];
+      setUserCoords((prev) => ({
+        ...(prev || {}),
+        lat,
+        lon,
+        isRealGPS: false,
+        accuracy: prev?.accuracy ?? null,
+      }));
+
+      const pct = Math.min(100, Math.round(((evacStepRef.current + 1) / totalSteps) * 100));
+      setEvacProgress(pct);
+      setEvacEtaMin(Math.max(0, Math.round((routeInfo.duration_min || 1) * (100 - pct) / 100)));
+
+      evacStepRef.current += 1;
+      if (evacStepRef.current >= totalSteps) {
+        stopEvacuation(true);
+      }
+    }, 250);
   }
 
   const severity = hazards.some((h) => h.type === "fire" || h.type === "alert") ? "danger" : hazards.length > 0 ? "caution" : "safe";
@@ -791,13 +1070,35 @@ export default function SafeRoutePlanner() {
                       ⚠ Route blocked by danger zone. Selecting next safest shelter...
                     </div>
                   )}
+                  {evacuating && (
+                    <div style={{ marginTop: 12, padding: "12px", borderRadius: 8, background: `${C.red}10`, border: `1px solid ${C.red}44` }}>
+                      <div style={H}>
+                        <Navigation size={14} color={C.red} />
+                        <span style={{ fontSize: 13, fontWeight: 800, color: C.red }}>Evacuation in progress</span>
+                      </div>
+                      <div style={{ marginTop: 10, height: 8, borderRadius: 4, background: C.line, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${evacProgress}%`, background: `linear-gradient(90deg, ${C.amber}, ${C.red})`, transition: "width 0.6s ease" }} />
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 11, fontFamily: fontMono }}>
+                        <span style={{ color: C.text }}>{evacProgress}% complete</span>
+                        <span style={{ color: evacEtaMin != null && evacEtaMin > 0 ? C.textDim : C.teal }}>
+                          {evacArrived ? "Arrived" : evacEtaMin != null && evacEtaMin > 0 ? `~${evacEtaMin} min left` : "Almost there"}
+                        </span>
+                      </div>
+                      {evacArrived && (
+                        <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: C.teal }}>
+                          ✅ You have reached the shelter. Stay safe.
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <Button
-                    variant={noSafeRoute ? "warning" : "success"}
+                    variant={noSafeRoute ? "warning" : evacuating ? "danger" : "success"}
                     disabled={!routeInfo}
-                    onClick={() => alert("Evacuation started. Follow the route to safety.")}
+                    onClick={startEvacuation}
                     style={{ width: "100%", marginTop: 12, padding: "12px", fontWeight: 800, fontSize: 15 }}
                   >
-                    <Navigation size={16} /> Start Evacuation
+                    <Navigation size={16} /> {evacuating ? "Stop Evacuation" : "Start Evacuation"}
                   </Button>
                 </>
               ) : (
@@ -912,6 +1213,7 @@ export default function SafeRoutePlanner() {
               zoom={13}
               geojson={routeGeojson}
               geoStyle={routeStyle}
+              geoKey={routeAnimKey}
             >
               <EscapeMapOverlay
                 userCoords={userCoords}

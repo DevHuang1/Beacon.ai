@@ -4,44 +4,61 @@ import MapFrame from "../components/MapFrameWrapper";
 import { Flame, Wind, Thermometer, Satellite, ToggleLeft, ToggleRight } from "lucide-react";
 import { C, S, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
+import { useLocation } from "../lib/LocationContext";
 import WildfireHotspotOverlay from "../components/WildfireHotspotOverlayWrapper";
 
 export default function WildfireRisk() {
+  const loc = useLocation();
   const [hotspots, setHotspots] = useState([]);
   const [conditions, setConditions] = useState(null);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [scarMode, setScarMode] = useState(false);
   const [scarData, setScarData] = useState(null);
   const [scarLoading, setScarLoading] = useState(false);
   const [scarError, setScarError] = useState(null);
 
   useEffect(() => {
-    api.wildfire.conditions().then((res) => {
+    setLoading(true);
+    setError(null);
+    api.wildfire.conditions(loc.lat, loc.lon).then((res) => {
       if (res?.success && res.data) {
         setHotspots(res.data.hotspots || []);
         if (res.data.conditions) setConditions(res.data.conditions);
       } else {
         setError(res?.error || "Failed to load wildfire data");
       }
-    }).catch((err) => setError(err.message));
-  }, []);
+    }).catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [loc.lat, loc.lon]);
 
   useEffect(() => {
     if (!scarMode) { setScarData(null); setScarError(null); return; }
     setScarLoading(true);
     setScarError(null);
-    api.geoai.segment({ image: {} }).then((res) => {
-      if (res?.success) {
-        setScarData(res.data);
-      } else {
+    (async () => {
+      try {
+        const satRes = await api.satellite(loc.lat, loc.lon);
+        if (!satRes?.success || !satRes.data?.base64) {
+          setScarData(null);
+          setScarError(satRes?.error || "Satellite image unavailable for burn scar analysis");
+          return;
+        }
+        const segRes = await api.geoai.segment({ image: { base64: satRes.data.base64 } });
+        if (segRes?.success && segRes.data) {
+          setScarData({ ...segRes.data, image: satRes.data });
+        } else {
+          setScarData(null);
+          setScarError(segRes?.error || "Burn scar segmentation failed");
+        }
+      } catch (err) {
         setScarData(null);
-        setScarError(res?.error || "Burn scar segmentation failed");
+        setScarError(err.message || "Burn scar segmentation failed");
+      } finally {
+        setScarLoading(false);
       }
-    }).catch((err) => {
-      setScarData(null);
-      setScarError(err.message || "Burn scar segmentation failed");
-    }).finally(() => setScarLoading(false));
-  }, [scarMode]);
+    })();
+  }, [scarMode, loc.lat, loc.lon]);
 
   const hasData = hotspots.length > 0;
   const scarGeo = scarMode && scarData?.type === "FeatureCollection" ? scarData : null;
@@ -96,7 +113,7 @@ export default function WildfireRisk() {
         </div>
       )}
 
-      {!hasData && !error && (
+      {loading && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 20 }}>
           <div className="skeleton" style={{ height: 460, borderRadius: 14 }} />
         </div>

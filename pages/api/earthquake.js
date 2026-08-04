@@ -1,36 +1,54 @@
 import { fetchWithTimeout } from "../../lib/api-utils";
 
 export default async function handler(req, res) {
-  const { min_magnitude = 0, hours = 24, lat, lon, radius_km = 500 } = req.query;
+  const { min_magnitude = 0, hours = 24, lat, lon, radius_km = 250 } = req.query;
   const magMin = Number(min_magnitude);
 
   try {
     // Use all_day feed for reliable data, all_hour often has 0 events
     const usgsUrl = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson";
-    const response = await fetchWithTimeout(usgsUrl, {}, 5000);
+    const response = await fetchWithTimeout(usgsUrl, {}, 10000);
     if (!response.ok) throw new Error(`USGS returned ${response.status}`);
 
     const geo = await response.json();
     const cutoff = Date.now() - Number(hours) * 3600000;
 
-    let events = geo.features
-      .filter((f) => f.properties.mag >= magMin && f.properties.time >= cutoff)
-      .slice(0, 50);
+    const latNum = Number(lat);
+    const lonNum = Number(lon);
+    const hasCenter = Number.isFinite(latNum) && Number.isFinite(lonNum);
+    const rKm = Number.isFinite(parseFloat(radius_km)) ? Math.max(parseFloat(radius_km), 10) : 250;
+    const degKm = 111.32;
 
-    // If lat/lon provided, filter by geographic proximity
-    if (lat && lon) {
-      const latNum = Number(lat);
-      const lonNum = Number(lon);
-      const degKm = 111.32;
-      const latRange = radius_km / degKm;
-      const lonRange = radius_km / (degKm * Math.cos((latNum * Math.PI) / 180));
-      events = events.filter((f) => {
-        const [flon, flat] = f.geometry.coordinates;
-        return (
-          Math.abs(flat - latNum) <= latRange &&
-          Math.abs(flon - lonNum) <= lonRange
-        );
-      });
+    const distKm = (aLat, aLon) => {
+      const dLat = ((aLat - latNum) * Math.PI) / 180;
+      const dLon = ((aLon - lonNum) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((latNum * Math.PI) / 180) * Math.cos((aLat * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+      return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    };
+
+    let events = geo.features.filter((f) => f.properties.mag >= magMin && f.properties.time >= cutoff);
+
+    if (hasCenter) {
+      const latRange = rKm / degKm;
+      const lonRange = rKm / (degKm * Math.cos((latNum * Math.PI) / 180));
+      events = events
+        .filter((f) => {
+          const [flon, flat] = f.geometry.coordinates;
+          return (
+            Math.abs(flat - latNum) <= latRange &&
+            Math.abs(flon - lonNum) <= lonRange
+          );
+        })
+        .sort((a, b) => {
+          const [alon, alat] = a.geometry.coordinates;
+          const [blon, blat] = b.geometry.coordinates;
+          return distKm(alat, alon) - distKm(blat, blon);
+        })
+        .slice(0, 8);
+    } else {
+      events = events.slice(0, 50);
     }
 
     const mapped = events.map((f, i) => {

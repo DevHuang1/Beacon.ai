@@ -37,7 +37,7 @@ export default async function handler(req, res) {
 
       const { data, error } = await supabase
         .from("alerts")
-        .select("id, sender_id, recipient_id, message, created_at, profiles!alerts_sender_id_fkey(username, display_name)")
+        .select("id, sender_id, recipient_id, message, acknowledged, created_at, profiles!alerts_sender_id_fkey(username, display_name)")
         .eq("recipient_id", user.id)
         .order("created_at", { ascending: false })
         .limit(20);
@@ -52,6 +52,7 @@ export default async function handler(req, res) {
         sender_id: a.sender_id,
         recipient_id: a.recipient_id,
         message: a.message,
+        acknowledged: a.acknowledged,
         created_at: a.created_at,
         sender_name: a.profiles?.display_name || a.profiles?.username || "A family member",
       }));

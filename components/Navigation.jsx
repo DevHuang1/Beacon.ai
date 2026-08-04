@@ -71,13 +71,19 @@ export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp })
   const loc = useLocation();
 
   const loadAlerts = useCallback(() => {
-    fetchWeatherAlerts(loc.lat, loc.lon)
-      .then((d) => setAlertCount(d?.success ? (d.alerts?.length || 0) : 0))
+    fetch("/api/profiles/alert")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.success !== true || !Array.isArray(d.data)) return setAlertCount(0);
+        setAlertCount(d.data.filter((a) => !a.acknowledged).length);
+      })
       .catch(() => setAlertCount(0));
-  }, [loc.lat, loc.lon]);
+  }, []);
 
   useEffect(() => {
     loadAlerts();
+    const iv = setInterval(loadAlerts, 10000);
+    return () => clearInterval(iv);
   }, [loadAlerts]);
 
   const handleLogout = async () => {
@@ -411,6 +417,7 @@ export function SideNav({ active, onNavigate, collapsed }) {
 export function AlertDrawer({ open, onClose }) {
   const loc = useLocation();
   const [alerts, setAlerts] = useState([]);
+  const [weatherAlerts, setWeatherAlerts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -418,16 +425,39 @@ export function AlertDrawer({ open, onClose }) {
     if (!open) return;
     setLoading(true);
     setError(null);
-    fetchWeatherAlerts(loc.lat, loc.lon)
+    const emergencyReq = fetch("/api/profiles/alert")
+      .then((r) => r.json())
       .then((d) => {
-        if (d?.success) setAlerts(d.alerts || []);
-        else {
-          setAlerts([]);
-          setError(d?.error || "Failed to load alerts");
+        if (d?.success === true && Array.isArray(d.data)) {
+          return d.data.filter((a) => !a.acknowledged).map((a) => ({
+            id: a.id,
+            type: "emergency",
+            headline: `🚨 Emergency alert from ${a.sender_name || "a family member"}`,
+            areaDesc: a.message,
+            severity: "severe",
+            created_at: a.created_at,
+          }));
         }
+        return [];
+      })
+      .catch(() => []);
+
+    const weatherReq = fetchWeatherAlerts(loc.lat, loc.lon)
+      .then((d) => {
+        if (d?.success) return (d.alerts || []).map((a) => ({ ...a, type: "weather" }));
+        return [];
+      })
+      .catch(() => []);
+
+    Promise.all([emergencyReq, weatherReq])
+      .then(([em, w]) => {
+        setAlerts(em);
+        setWeatherAlerts(w);
+        setError(null);
       })
       .catch(() => {
         setAlerts([]);
+        setWeatherAlerts([]);
         setError("Failed to load alerts");
       })
       .finally(() => setLoading(false));
@@ -435,7 +465,9 @@ export function AlertDrawer({ open, onClose }) {
 
   if (!open) return null;
 
+  const allAlerts = [...alerts, ...weatherAlerts];
   const toneFor = (a) => {
+    if (a.type === "emergency") return "critical";
     const sev = (a.severity || "").toLowerCase();
     return sev === "extreme" || sev === "severe" ? "critical" : "warning";
   };
@@ -445,7 +477,7 @@ export function AlertDrawer({ open, onClose }) {
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(15, 23, 42, 0.5)", backdropFilter: "blur(4px)" }} />
       <aside style={{
         position: "relative",
-        width: 380,
+        width: 420,
         background: C.panel,
         borderLeft: `1px solid ${C.line}`,
         height: "100%",
@@ -462,18 +494,18 @@ export function AlertDrawer({ open, onClose }) {
           {loading && (
             <div style={{ fontSize: 13, color: C.textFaint, textAlign: "center", padding: 24 }}>Loading alerts...</div>
           )}
-          {!loading && alerts.length === 0 && (
+          {!loading && allAlerts.length === 0 && (
             <div style={{ fontSize: 13, color: C.textFaint, textAlign: "center", padding: 24, lineHeight: 1.6 }}>
               {error || "No active alerts for your area."}
             </div>
           )}
-          {alerts.map((a, i) => {
+          {allAlerts.map((a, i) => {
             const tone = toneFor(a);
             const tc = tone === "critical" ? C.red : C.amber;
             return (
               <div key={a.id || `alert-${i}`} style={{
                 display: "flex", gap: 14, alignItems: "flex-start",
-                background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 12,
+                background: C.panel2, border: `1px solid ${a.type === "emergency" ? C.red + "44" : C.line}`, borderRadius: 12,
                 padding: 16,
               }}>
                 <div style={{

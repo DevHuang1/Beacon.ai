@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { MapContainer, TileLayer, GeoJSON, useMapEvent, useMap, Circle } from "react-leaflet";
+import React, { useState, useEffect, useRef } from "react";
+import { MapContainer, TileLayer, GeoJSON, useMapEvent, useMap, Circle, ImageOverlay } from "react-leaflet";
 import Button from "./Button";
 import { C, S, fontMono } from "../lib/theme";
 import { useLocation } from "../lib/LocationContext";
@@ -67,12 +67,15 @@ function ResizeWatcher() {
 export default function MapFrame({
   children, height = 380,
   center: propCenter,
-  zoom = 13, geojson = null, geoStyle = null, overlay = null,
+  zoom = 13, geojson = null, geoStyle = null, overlay = null, geoKey = null,
+  imageOverlay = null,
 }) {
   const loc = useLocation();
   const [tileFailed, setTileFailed] = useState(false);
   const [mapKey, setMapKey] = useState(0);
   const [mapCenter, setMapCenter] = useState(propCenter || [loc.lat, loc.lon]);
+  const geoJsonVersion = useRef(0);
+  const lastGeoJson = useRef(null);
 
   const [userPos, setUserPos] = useState([loc.lat, loc.lon]);
   const [userAcc, setUserAcc] = useState(loc.accuracy || null);
@@ -161,7 +164,15 @@ export default function MapFrame({
         <TileErrorWatcher onError={() => setTileFailed(true)} />
         <MapCenterUpdater center={mapCenter} zoom={zoom} />
         <ResizeWatcher />
-        {geojson && <GeoJSON data={geojson} style={geoStyle || undefined} />}
+        {(() => {
+          if (!geojson) return null;
+          if (geojson !== lastGeoJson.current) {
+            lastGeoJson.current = geojson;
+            geoJsonVersion.current += 1;
+          }
+          return <GeoJSON key={`geo-${geoKey ?? geoJsonVersion.current}`} data={geojson} style={geoStyle || undefined} />;
+        })()}
+        {imageOverlay && <ImageOverlay url={imageOverlay.url} bounds={imageOverlay.bounds} opacity={imageOverlay.opacity ?? 0.75} />}
         <LocationLayer position={userPos} accuracy={userAcc} />
         {children}
       </MapContainer>
