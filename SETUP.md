@@ -45,7 +45,8 @@ Replace with a real source like:
 --------------
 npm install
 npm run dev
-Open http://localhost:3000
+
+If port `3000` is already occupied, the startup script will automatically select the next free port and log the final URL for you.
 
 
 5. VERIFY EVERYTHING WORKS
