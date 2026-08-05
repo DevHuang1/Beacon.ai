@@ -40,7 +40,7 @@ cp .env.example .env.local   # add your FIRMS_API_KEY for wildfire
 npm run dev
 ```
 
-Open http://localhost:3000.
+The dev server will automatically bind to an available port when `3000` is already in use. The console will print the actual URL to open.
 
 See [SETUP.md](./SETUP.md) for detailed setup instructions.
 
