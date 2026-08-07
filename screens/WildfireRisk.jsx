@@ -5,10 +5,12 @@ import { Flame, Wind, Thermometer, Satellite, ToggleLeft, ToggleRight } from "lu
 import { C, S, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
 import { useLocation } from "../lib/LocationContext";
+import { useIsMobile } from "../lib/useIsMobile";
 import WildfireHotspotOverlay from "../components/WildfireHotspotOverlayWrapper";
 
 export default function WildfireRisk() {
   const loc = useLocation();
+  const isMobile = useIsMobile();
   const [hotspots, setHotspots] = useState([]);
   const [conditions, setConditions] = useState(null);
   const [error, setError] = useState(null);
@@ -119,7 +121,7 @@ export default function WildfireRisk() {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.8fr 1fr", gap: 18 }}>
         <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14, position: "relative" }}>
           <MapFrame height={460} geojson={scarGeo} geoStyle={scarStyle}>
             {hasData && <WildfireHotspotOverlay hotspots={hotspots} />}

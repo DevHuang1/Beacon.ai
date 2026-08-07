@@ -90,6 +90,7 @@ p, span, label, li { font-family: ${fontBody}; color: var(--text); line-height: 
 }
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 @keyframes slideIn { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes slideInRight { from { transform: translateX(-24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }
 @keyframes markerPulse {

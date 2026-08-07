@@ -12,6 +12,7 @@ import shelterService from "../lib/services/shelterService";
 import { validateAndFilterShelters } from "../lib/haversine";
 import { useShelters, useWeatherNow, useWeatherAlerts, useHotspots } from "../lib/swr";
 import { useLocation } from "../lib/LocationContext";
+import { useIsMobile } from "../lib/useIsMobile";
 
 const EscapeMapContent = dynamic(() => import("./EscapeMapContent"), { ssr: false });
 
@@ -25,6 +26,7 @@ function formatDuration(min) {
 const ALERT_SEVERITY_RANK = { Extreme: 4, Severe: 3, Moderate: 2, Minor: 1, Unknown: 0 };
 
 export default function EscapeAssistant() {
+  const isMobile = useIsMobile();
   const loc = useLocation();
   const [selectedShelter, setSelectedShelter] = useState(null);
   const [userLocation, setUserLocation] = useState([loc.lat, loc.lon]);
@@ -187,7 +189,7 @@ export default function EscapeAssistant() {
       )}
 
       {/* Main Interactive Map & Details Grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.7fr 1fr", gap: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.7fr 1fr", gap: 18 }}>
         <div>
           <Panel style={{ padding: 0, overflow: "hidden", borderRadius: 14 }}>
             <MapFrame height={480} geojson={routeGeojson} geoStyle={routeStyle}>

@@ -6,6 +6,7 @@ import { Badge } from "./ui2";
 import Button from "./Button";
 import { useAuth } from "./AuthProvider";
 import { useLocation } from "../lib/LocationContext";
+import { useIsMobile } from "../lib/useIsMobile";
 import { createClient } from "../lib/supabase-client";
 import {
   AlertTriangle, MapPin, Shield, Activity, Flame, CloudRain, Navigation,
@@ -20,6 +21,7 @@ function fetchWeatherAlerts(lat, lon) {
 }
 
 export function StatusRibbon({ activeModule }) {
+  const isMobile = useIsMobile();
   const contextMap = {
     escape: { tone: "critical", text: "Disaster Escape Assistant — Live hazard routing, flood warning detection, and active shelter guidance", icon: TriangleAlert },
     route: { tone: "info", text: "Safe Route Planner — AI hazard avoidance routing bypassing flooded roads and landslides", icon: Navigation },
@@ -53,7 +55,7 @@ export function StatusRibbon({ activeModule }) {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontFamily: fontMono, color: C.teal }}>
+        <span style={{ display: isMobile ? "none" : "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontFamily: fontMono, color: C.teal }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.teal, animation: "blink 1.5s infinite" }} />
           GeoAI Engine Active
         </span>
@@ -69,6 +71,7 @@ export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp })
   const router = useRouter();
   const initials = user?.email?.charAt(0).toUpperCase() || "?";
   const loc = useLocation();
+  const isMobile = useIsMobile();
 
   const loadAlerts = useCallback(() => {
     fetch("/api/profiles/alert")
@@ -107,45 +110,48 @@ export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp })
         <Button variant="ghost" ariaLabel="Toggle navigation" onClick={onToggleNav} style={{ width: 40, height: 40, padding: 6 }}>
           <Radio size={18} color={C.red} strokeWidth={2.4} />
         </Button>
-        <div style={{ lineHeight: 1.2 }}>
+        <div style={{ lineHeight: 1.2, minWidth: 0 }}>
           <div style={{
             fontFamily: fontMono,
             fontWeight: 800,
-            fontSize: 18,
+            fontSize: isMobile ? 15 : 18,
             color: C.text,
             letterSpacing: "0.02em",
             display: "flex",
             alignItems: "center",
             gap: 8,
+            whiteSpace: "nowrap",
           }}>
             <span style={{ background: C.blue, color: "#fff", padding: "1px 7px", borderRadius: 6, fontSize: 12, fontWeight: 900, letterSpacing: "0.05em" }}>AI</span>
-            BEACON.AI
+            {isMobile ? "BEACON" : "BEACON.AI"}
           </div>
-          <div className="meta" style={{
-            letterSpacing: "0.02em",
-            fontSize: 12,
-            color: C.textDim,
-            fontWeight: 600,
-          }}>
-            Emergency Escape & Hazard Intelligence
-          </div>
+          {!isMobile && (
+            <div className="meta" style={{
+              letterSpacing: "0.02em",
+              fontSize: 12,
+              color: C.textDim,
+              fontWeight: 600,
+            }}>
+              Emergency Escape & Hazard Intelligence
+            </div>
+          )}
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 4 : 10 }}>
         {onHelp && (
           <Button variant="ghost" ariaLabel="Show tutorial" onClick={onHelp} style={{ width: 36, height: 36, padding: 6 }}>
             <HelpCircle size={18} color={C.textFaint} />
           </Button>
         )}
-        <div className="mono meta" aria-hidden style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: C.panel2, borderRadius: 8, border: `1px solid ${C.line}` }}>
+        <div className="mono meta" aria-hidden style={{ display: isMobile ? "none" : "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: C.panel2, borderRadius: 8, border: `1px solid ${C.line}` }}>
           <Compass size={14} color={loc.gpsStatus === "live" ? C.teal : C.textFaint} />
           <span style={{ color: C.text, fontWeight: 600 }}>{loc.coords}</span>
           {loc.gpsStatus === "live" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.teal }} />}
         </div>
-        <Button variant="danger" ariaLabel="Open alerts" onClick={() => { onOpenAlert(); loadAlerts(); }} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", fontWeight: 700 }}>
+        <Button variant="danger" ariaLabel="Open alerts" onClick={() => { onOpenAlert(); loadAlerts(); }} style={{ display: "flex", alignItems: "center", gap: 8, padding: isMobile ? "8px 10px" : "8px 14px", fontWeight: 700 }}>
           <Bell size={15} strokeWidth={2.4} aria-hidden />
-          <span aria-hidden>Active Alerts</span>
+          {!isMobile && <span aria-hidden>Active Alerts</span>}
           <span aria-live="polite" style={{
             background: "#fff",
             color: C.red,
@@ -213,10 +219,17 @@ export function TopBar({ active, onNavigate, onOpenAlert, onToggleNav, onHelp })
   );
 }
 
-export function SideNav({ active, onNavigate, collapsed }) {
+export function SideNav({ active, onNavigate, collapsed, mobile = false, onClose }) {
   const primaryModules = MODULES.slice(0, 4);
   const monitoringModules = MODULES.slice(4);
   const loc = useLocation();
+  const isMobile = useIsMobile();
+  const showLabels = mobile ? true : !collapsed;
+
+  const handleNav = (id) => {
+    if (onNavigate) onNavigate(id);
+    if (onClose) onClose();
+  };
 
   const handleSos = async () => {
     if (typeof window === "undefined") return;
@@ -231,19 +244,8 @@ export function SideNav({ active, onNavigate, collapsed }) {
     } catch {}
   };
 
-  return (
-    <nav aria-label="Primary modules" style={{
-      width: collapsed ? theme.TOKENS.sizes.leftNavCollapsed : theme.TOKENS.sizes.leftNav,
-      flexShrink: 0,
-      background: C.panel,
-      borderRight: `1px solid ${C.line}`,
-      display: "flex",
-      flexDirection: "column",
-      padding: "16px 10px",
-      gap: 6,
-      transition: "width 0.2s ease",
-      boxShadow: S.sm,
-    }}>
+  const content = (
+    <>
       {/* Category 1: Emergency & Assistant */}
       <div style={{
         fontFamily: fontMono,
@@ -251,10 +253,10 @@ export function SideNav({ active, onNavigate, collapsed }) {
         color: C.textFaint,
         letterSpacing: "0.08em",
         textTransform: "uppercase",
-        padding: collapsed ? "0 6px 6px" : "0 10px 6px",
+        padding: showLabels ? "0 10px 6px" : "0 6px 6px",
         fontWeight: 700,
       }}>
-        {collapsed ? "AST" : "Emergency Navigation"}
+        {showLabels ? "Emergency Navigation" : "AST"}
       </div>
 
       {primaryModules.map((m) => {
@@ -264,7 +266,7 @@ export function SideNav({ active, onNavigate, collapsed }) {
         return (
           <Button
             key={m.id}
-            onClick={() => onNavigate(m.id)}
+            onClick={() => handleNav(m.id)}
             title={m.label}
             ariaLabel={m.label}
             aria-current={isActive ? "page" : undefined}
@@ -276,9 +278,9 @@ export function SideNav({ active, onNavigate, collapsed }) {
               border: `1px solid ${isActive ? C.teal : "transparent"}`,
               color: isActive ? C.teal : C.textDim,
               borderRadius: 10,
-              padding: collapsed ? "10px 8px" : "10px 12px",
+              padding: showLabels ? "10px 12px" : "10px 8px",
               textAlign: "left",
-              justifyContent: collapsed ? "center" : "flex-start",
+              justifyContent: showLabels ? "flex-start" : "center",
               fontSize: 14,
               fontWeight: isActive ? 800 : 600,
               minHeight: 44,
@@ -292,7 +294,7 @@ export function SideNav({ active, onNavigate, collapsed }) {
             }}>
               <Icon size={16} strokeWidth={2.2} color={isActive ? C.teal : C.textFaint} aria-hidden />
             </div>
-            {!collapsed && <span style={{ whiteSpace: "nowrap" }}>{m.short}</span>}
+            {showLabels && <span style={{ whiteSpace: "nowrap" }}>{m.short}</span>}
           </Button>
         );
       })}
@@ -304,10 +306,10 @@ export function SideNav({ active, onNavigate, collapsed }) {
         color: C.textFaint,
         letterSpacing: "0.08em",
         textTransform: "uppercase",
-        padding: collapsed ? "12px 6px 6px" : "12px 10px 6px",
+        padding: showLabels ? "12px 10px 6px" : "12px 6px 6px",
         fontWeight: 700,
       }}>
-        {collapsed ? "MON" : "GeoAI Hazard Sensors"}
+        {showLabels ? "GeoAI Hazard Sensors" : "MON"}
       </div>
 
       {monitoringModules.map((m) => {
@@ -317,7 +319,7 @@ export function SideNav({ active, onNavigate, collapsed }) {
         return (
           <Button
             key={m.id}
-            onClick={() => onNavigate(m.id)}
+            onClick={() => handleNav(m.id)}
             title={m.label}
             ariaLabel={m.label}
             aria-current={isActive ? "page" : undefined}
@@ -329,9 +331,9 @@ export function SideNav({ active, onNavigate, collapsed }) {
               border: `1px solid ${isActive ? C.blue : "transparent"}`,
               color: isActive ? C.blue : C.textDim,
               borderRadius: 10,
-              padding: collapsed ? "10px 8px" : "10px 12px",
+              padding: showLabels ? "10px 12px" : "10px 8px",
               textAlign: "left",
-              justifyContent: collapsed ? "center" : "flex-start",
+              justifyContent: showLabels ? "flex-start" : "center",
               fontSize: 14,
               fontWeight: isActive ? 800 : 600,
               minHeight: 44,
@@ -345,7 +347,7 @@ export function SideNav({ active, onNavigate, collapsed }) {
             }}>
               <Icon size={16} strokeWidth={2.2} color={isActive ? C.blue : C.textFaint} aria-hidden />
             </div>
-            {!collapsed && <span style={{ whiteSpace: "nowrap" }}>{m.short}</span>}
+            {showLabels && <span style={{ whiteSpace: "nowrap" }}>{m.short}</span>}
           </Button>
         );
       })}
@@ -354,7 +356,7 @@ export function SideNav({ active, onNavigate, collapsed }) {
 
       {/* Profile & Settings */}
       <Button
-        onClick={() => onNavigate("profile")}
+        onClick={() => handleNav("profile")}
         ariaLabel="Profile and settings"
         style={{
           display: "flex",
@@ -364,9 +366,9 @@ export function SideNav({ active, onNavigate, collapsed }) {
           border: `1px solid ${active === "profile" ? C.blue : "transparent"}`,
           color: active === "profile" ? C.blue : C.textDim,
           borderRadius: 10,
-          padding: collapsed ? "10px 8px" : "10px 12px",
+          padding: showLabels ? "10px 12px" : "10px 8px",
           textAlign: "left",
-          justifyContent: collapsed ? "center" : "flex-start",
+          justifyContent: showLabels ? "flex-start" : "center",
           fontSize: 14,
           fontWeight: active === "profile" ? 800 : 600,
           minHeight: 44,
@@ -380,10 +382,10 @@ export function SideNav({ active, onNavigate, collapsed }) {
         }}>
           <Settings size={16} strokeWidth={2.2} color={active === "profile" ? C.blue : C.textFaint} aria-hidden />
         </div>
-        {!collapsed && <span style={{ whiteSpace: "nowrap" }}>Settings</span>}
+        {showLabels && <span style={{ whiteSpace: "nowrap" }}>Settings</span>}
       </Button>
 
-      {!collapsed && (
+      {showLabels && (
         <div style={{
           margin: "12px 0 0",
           padding: "12px",
@@ -410,12 +412,53 @@ export function SideNav({ active, onNavigate, collapsed }) {
           </Button>
         </div>
       )}
+    </>
+  );
+
+  if (mobile) {
+    return (
+      <div role="dialog" aria-modal="true" aria-label="Navigation menu" style={{ position: "fixed", inset: 0, zIndex: 10000, display: "flex" }}>
+        <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(15, 23, 42, 0.5)", backdropFilter: "blur(4px)" }} />
+        <aside style={{
+          position: "relative",
+          width: "min(300px, 84vw)",
+          height: "100%",
+          background: C.panel,
+          borderRight: `1px solid ${C.line}`,
+          display: "flex",
+          flexDirection: "column",
+          padding: "16px 10px",
+          gap: 6,
+          overflowY: "auto",
+          animation: "slideInRight 0.25s ease",
+        }}>
+          {content}
+        </aside>
+      </div>
+    );
+  }
+
+  return (
+    <nav aria-label="Primary modules" style={{
+      width: collapsed ? theme.TOKENS.sizes.leftNavCollapsed : theme.TOKENS.sizes.leftNav,
+      flexShrink: 0,
+      background: C.panel,
+      borderRight: `1px solid ${C.line}`,
+      display: "flex",
+      flexDirection: "column",
+      padding: "16px 10px",
+      gap: 6,
+      transition: "width 0.2s ease",
+      boxShadow: S.sm,
+    }}>
+      {content}
     </nav>
   );
 }
 
 export function AlertDrawer({ open, onClose }) {
   const loc = useLocation();
+  const isMobile = useIsMobile();
   const [alerts, setAlerts] = useState([]);
   const [weatherAlerts, setWeatherAlerts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -477,11 +520,12 @@ export function AlertDrawer({ open, onClose }) {
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(15, 23, 42, 0.5)", backdropFilter: "blur(4px)" }} />
       <aside style={{
         position: "relative",
-        width: 420,
+        width: isMobile ? "100%" : 420,
         background: C.panel,
         borderLeft: `1px solid ${C.line}`,
         height: "100%",
-        padding: 24,
+        padding: isMobile ? 16 : 24,
+        overflowY: "auto",
         animation: "slideIn 0.2s ease",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>

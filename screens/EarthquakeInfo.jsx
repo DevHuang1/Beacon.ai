@@ -6,6 +6,7 @@ import { Activity, Satellite, ToggleLeft, ToggleRight, Clock, ExternalLink, Chec
 import { C, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
 import { useLocation } from "../lib/LocationContext";
+import { useIsMobile } from "../lib/useIsMobile";
 
 const QuakeMapMarkers = dynamic(() => import("./QuakeMapMarkers"), { ssr: false });
 
@@ -13,6 +14,7 @@ const DAMAGE_COLORS = { new_construction: C.amber, deforestation: C.red, floodin
 
 export default function EarthquakeInfo() {
   const loc = useLocation();
+  const isMobile = useIsMobile();
   const [minMag, setMinMag] = useState(0);
   const [tab, setTab] = useState("recent");
   const [quakes, setQuakes] = useState([]);
@@ -90,7 +92,7 @@ export default function EarthquakeInfo() {
       </div>
 
       {tab === "recent" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: 18 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1.5fr", gap: 18 }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14, padding: "12px 16px", background: C.panel2, borderRadius: 10, border: `1px solid ${C.line}` }}>
               <span style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>Min magnitude</span>

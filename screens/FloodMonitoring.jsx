@@ -5,6 +5,7 @@ import { Waves, Droplets, Gauge, TrendingUp, Satellite, ToggleLeft, ToggleRight 
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { api } from "../lib/api";
 import { useLocation } from "../lib/LocationContext";
+import { useIsMobile } from "../lib/useIsMobile";
 
 const TONE_MAP = { high: "critical", moderate: "warning", low: "safe" };
 
@@ -32,6 +33,7 @@ function makeFloodGeojson(waterPct, centerLat, centerLon) {
 
 export default function FloodMonitoring() {
   const loc = useLocation();
+  const isMobile = useIsMobile();
   const [gauges, setGauges] = useState(null);
   const [riskZones, setRiskZones] = useState(null);
   const [stats, setStats] = useState(null);
@@ -199,7 +201,7 @@ export default function FloodMonitoring() {
 
       {hasData && (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 18 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)", gap: 14, marginBottom: 18 }}>
             {(gaugeList.length > 0 ? gaugeList.map((c, i) => {
               const tone = TONE_MAP[c.risk] || "warning";
               const note = c.rate_mph > 0 ? `Rising ${c.rate_mph.toFixed(1)}m/hr` : "Stable";
@@ -240,7 +242,7 @@ export default function FloodMonitoring() {
             }))}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 14, marginBottom: 18 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.6fr 1fr", gap: 14, marginBottom: 18 }}>
             <Panel title="Risk indicators">
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 {(riskList.length > 0 ? riskList : alertList.map((a) => ({

@@ -6,9 +6,11 @@ import { Search, CloudRain, Wind, Droplets, TriangleAlert, ShieldAlert, MapPin, 
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
 import { useWeatherForecast } from "../lib/swr";
 import { useLocation } from "../lib/LocationContext";
+import { useIsMobile } from "../lib/useIsMobile";
 
 export default function WeatherAlerts() {
   const loc = useLocation();
+  const isMobile = useIsMobile();
   const [notifDetail, setNotifDetail] = useState(true);
   const [notifLoc, setNotifLoc] = useState(true);
   const [notifSevere, setNotifSevere] = useState(false);
@@ -79,13 +81,13 @@ export default function WeatherAlerts() {
       )}
 
       {loading && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 14 }}>
           <div className="skeleton" style={{ height: 300, borderRadius: 14 }} />
           <div className="skeleton" style={{ height: 300, borderRadius: 14 }} />
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 18 }}>
         <div>
           <div style={{ position: "relative", marginBottom: 14 }}>
             <Search size={15} color={C.textFaint} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />

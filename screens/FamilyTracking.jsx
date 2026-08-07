@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { C, fontDisplay, fontMono } from "../lib/theme";
 import { useLocation } from "../lib/LocationContext";
+import { useIsMobile } from "../lib/useIsMobile";
 import { sendEmergencyAlert } from "../lib/emergencyAlerts";
 
 const FamilyMapMarkers = dynamic(() => import("./FamilyMapMarkers"), { ssr: false });
@@ -60,6 +61,7 @@ function fallbackOffsetFor(id) {
 
 export default function FamilyTracking() {
   const loc = useLocation();
+  const isMobile = useIsMobile();
   const [members, setMembers] = useState(() => {
     const saved = loadJSON("beacon_profile_family", []);
     return Array.isArray(saved) ? saved : [];
@@ -285,7 +287,7 @@ export default function FamilyTracking() {
       </div>
 
       {/* Main Grid: Family List & Interactive Map */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1.6fr", gap: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.4fr 1.6fr", gap: 18 }}>
         <Panel title="Family Members Status">
           {members.length === 0 ? (
             <div style={{ fontSize: 13, color: C.textFaint, textAlign: "center", padding: "28px 20px", lineHeight: 1.6 }}>

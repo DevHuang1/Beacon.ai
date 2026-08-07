@@ -12,6 +12,7 @@ import routeService from "../lib/services/routeService";
 import { api } from "../lib/api";
 import { calculateHaversineMiles } from "../lib/haversine";
 import { useLocation } from "../lib/LocationContext";
+import { useIsMobile } from "../lib/useIsMobile";
 import { sendEmergencyAlert } from "../lib/emergencyAlerts";
 
 const EscapeMapOverlay = dynamic(() => import("../components/EscapeMapOverlay"), { ssr: false });
@@ -174,6 +175,7 @@ function generateCoordsNearby(lat, lon, minMeters = 500, maxMeters = 1000) {
 
 export default function SafeRoutePlanner() {
   const loc = useLocation();
+  const isMobile = useIsMobile();
   const [userCoords, setUserCoords] = useState(null);
   const [shelters, setShelters] = useState([]);
   const [recommended, setRecommended] = useState(null);
@@ -935,7 +937,7 @@ export default function SafeRoutePlanner() {
       </div>
 
       {/* Main Grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 10, alignItems: "stretch" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "340px 1fr", gap: 10, alignItems: "stretch" }}>
         {/* Left Panel */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {/* AI Analysis Panel */}

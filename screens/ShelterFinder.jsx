@@ -10,9 +10,11 @@ import routeService from "../lib/services/routeService";
 import { validateAndFilterShelters } from "../lib/haversine";
 import { useShelters } from "../lib/swr";
 import { useLocation } from "../lib/LocationContext";
+import { useIsMobile } from "../lib/useIsMobile";
 
 export default function ShelterFinder() {
   const loc = useLocation();
+  const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
   const [maxRadius, setMaxRadius] = useState(() => shelterService.getDefaultRadius());
@@ -275,7 +277,7 @@ export default function ShelterFinder() {
         </Panel>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1.5fr", gap: 18 }}>
         <div className="scrollbar" style={{
           display: "flex", flexDirection: "column", gap: 12,
           maxHeight: 600, overflowY: "auto", paddingRight: 6,
