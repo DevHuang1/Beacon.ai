@@ -118,6 +118,12 @@ async function notifyByEmail(supabase, { recipient_id, senderId, message }) {
       recipientName,
       senderName,
       message,
+    }).then((r) => {
+      if (r?.sent) {
+        console.log(`[alert] Emergency email sent to ${recipientEmail}`);
+      } else {
+        console.warn(`[alert] Email not sent to ${recipientEmail}: reason=${r?.reason}`);
+      }
     });
   } catch (err) {
     console.warn("[alert] notifyByEmail failed:", err.message);

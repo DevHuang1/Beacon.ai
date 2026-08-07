@@ -37,8 +37,13 @@ body {
   font-size: var(--base-size);
   line-height: 1.5;
   letter-spacing: 0.008em;
+  overflow-x: hidden;
 }
 #__next { height: 100%; }
+
+img, svg, canvas { max-width: 100%; }
+
+.grid, main > * { min-width: 0; }
 
 ::selection { background: ${C.blue}44; color: ${C.text}; }
 
