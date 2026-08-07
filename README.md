@@ -24,24 +24,41 @@ A real-time disaster preparedness and evacuation app built with Next.js, Leaflet
 - Emergency alerts notify tracked family members by email (Resend) with app buttons that deep-link into the app.
 - The top-bar bell polls `/api/profiles/alert` and merges unacknowledged emergency alerts with NWS weather alerts, with severity-aware tones.
 
+## Languages & tools
+
+- **JavaScript** — app logic, SSR with Next.js
+- **React** — UI components and state
+- **HTML & CSS** — inline-styled UI, theme-aware global styles
+- **Node.js** — serverless API routes (`/api/*`)
+
+### Key libraries
+
+- **Next.js** — React framework (SSG + API routes)
+- **Leaflet / react-leaflet** — interactive maps
+- **SWR** — data fetching and caching
+- **Supabase** — profiles, family, alert persistence
+- **Resend** — emergency email notifications
+- **Groq / Google GenAI** — GeoAI assistant features
+- **lucide-react** — icons
+
 ## Data sources
 
 | API | Source | Status | Key needed? |
 |-----|--------|--------|-------------|
-| Weather | [NWS API](https://www.weather.gov/documentation/services-web-api) | Live | No |
-| Weather fallback | [Open-Meteo](https://open-meteo.com/) | Live (non-US) | No |
-| Geocoding | [Nominatim](https://nominatim.openstreetmap.org/) | Live | No |
-| Earthquakes | [USGS Earthquake Catalog](https://earthquake.usgs.gov/fdsnws/event/1/) | Live | No |
-| River gauges | [USGS NWIS](https://waterservices.usgs.gov/) | Live | No |
-| Flood alerts | [GDACS RSS](https://www.gdacs.org/) | Live | No |
-| Routing | [OSRM](https://project-osrm.org/) (OpenStreetMap) | Live | No |
-| Wildfire | [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/) | Live | Yes (free) |
-| Satellite imagery | [NASA GIBS](https://earthdata.nasa.gov/eosdis/science-system-description/eosdis-components/gibs) | Live | No |
-| Radar | NOAA NEXRAD (Iowa Environmental Mesonet) | Live | No |
-| NWS alerts | [NWS API](https://api.weather.gov/alerts) | Live | No |
-| Map tiles | [OpenStreetMap](https://www.openstreetmap.org/) | Live | No |
-| Emergency email | [Resend](https://resend.com/) | Live | Yes (free) |
-| Shelters | Hardcoded demo (Eureka, CA) | Mock | No |
+| Weather | ☁️ [NWS API](https://www.weather.gov/documentation/services-web-api) | Live | No |
+| Weather fallback | 🌍 [Open-Meteo](https://open-meteo.com/) | Live (non-US) | No |
+| Geocoding | 📍 [Nominatim](https://nominatim.openstreetmap.org/) | Live | No |
+| Earthquakes | 🌐 [USGS Earthquake Catalog](https://earthquake.usgs.gov/fdsnws/event/1/) | Live | No |
+| River gauges | 💧 [USGS NWIS](https://waterservices.usgs.gov/) | Live | No |
+| Flood alerts | 🌊 [GDACS RSS](https://www.gdacs.org/) | Live | No |
+| Routing | 🛣️ [OSRM](https://project-osrm.org/) (OpenStreetMap) | Live | No |
+| Wildfire | 🔥 [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/) | Live | Yes (free) |
+| Satellite imagery | 🛰️ [NASA GIBS](https://earthdata.nasa.gov/eosdis/science-system-description/eosdis-components/gibs) | Live | No |
+| Radar | 📡 NOAA NEXRAD (Iowa Environmental Mesonet) | Live | No |
+| NWS alerts | ⚠️ [NWS API](https://api.weather.gov/alerts) | Live | No |
+| Map tiles | 🗺️ [OpenStreetMap](https://www.openstreetmap.org/) | Live | No |
+| Emergency email | ✉️ [Resend](https://resend.com/) | Live | Yes (free) |
+| Shelters | 🏠 Hardcoded demo (Eureka, CA) | Mock | No |
 
 ## Quick start
 
