@@ -69,6 +69,26 @@ export default function WeatherAlerts() {
         </div>
       </div>
 
+      {hasData && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, marginBottom: 14,
+          background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 10,
+          padding: "8px 14px", fontSize: 13,
+        }}>
+          <MapPin size={14} color={C.teal} style={{ flexShrink: 0 }} />
+          <span style={{ color: C.text, fontWeight: 700 }}>
+            {forecastData?.location?.name || loc.displayLabel}
+          </span>
+          {forecastData?.location?.state && (
+            <span style={{ color: C.textFaint }}>{forecastData.location.state}</span>
+          )}
+          <span style={{ color: C.textFaint, fontFamily: fontMono }}>{loc.coords}</span>
+          <span style={{ marginLeft: "auto", color: C.textFaint, fontSize: 11 }}>
+            {forecastData?.location?.name ? "Weather data for this location" : "Forecast for saved location"}
+          </span>
+        </div>
+      )}
+
       {error && (
         <div style={{
           background: C.redDim, border: `1px solid ${C.red}55`, borderRadius: 12,

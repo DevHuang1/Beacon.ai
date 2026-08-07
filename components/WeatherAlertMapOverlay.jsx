@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { TileLayer, Polygon, Popup } from "react-leaflet";
 import { ShieldAlert } from "lucide-react";
+import { C } from "../lib/theme";
 import { api } from "../lib/api";
 
 /**
@@ -116,16 +117,16 @@ function AlertPopup({ alert, color }) {
           <span>{alert.type || "Weather Warning"}</span>
         </div>
 
-        <div style={{ background: "#FEF2F2", border: `1px solid ${color}40`, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#0F172A", marginBottom: 4 }}>
+        <div style={{ background: C.redDim, border: `1px solid ${color}40`, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 4 }}>
             {alert.headline || alert.type}
           </div>
-          <div style={{ fontSize: 11, color: "#475569", lineHeight: 1.4 }}>
+          <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.4 }}>
             {alert.areaDesc || "Affecting regional emergency zones"}
           </div>
         </div>
 
-        <div style={{ fontSize: 11, color: "#64748B", display: "flex", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 11, color: C.textFaint, display: "flex", justifyContent: "space-between" }}>
           <span>Severity: <strong style={{ color }}>{alert.severity || "Severe"}</strong></span>
           <span>Status: <strong>Active</strong></span>
         </div>

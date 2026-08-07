@@ -214,6 +214,13 @@ select option { background: var(--panel); color: var(--text); }
 .leaflet-popup-tip { background: var(--panel) !important; border: 1px solid var(--line) !important; }
 .leaflet-popup-close-button { color: var(--text-faint) !important; }
 .leaflet-container { background: var(--bg) !important; }
+
+/* Base map tiles (OSM light) are inverted to match dark mode. Only the tile
+   pane is filtered so route/hazard vector layers keep their real colors. */
+html[data-theme="dark"] .leaflet-tile {
+  filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+  transition: filter 0.3s ease;
+}
 `;
 
 export function GlobalStyle() {

@@ -1,6 +1,7 @@
 import React from "react";
 import { CircleMarker, Popup, Circle } from "react-leaflet";
 import { Flame, Satellite, AlertTriangle } from "lucide-react";
+import { C } from "../lib/theme";
 
 export default function WildfireHotspotOverlay({ hotspots = [] }) {
   if (!hotspots || hotspots.length === 0) return null;
@@ -45,23 +46,23 @@ export default function WildfireHotspotOverlay({ hotspots = [] }) {
             >
               <Popup>
                 <div style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", width: 220, padding: "2px 0" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, color: "#DC2626", fontWeight: 800, fontSize: 14 }}>
-                    <Flame size={18} color="#DC2626" />
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, color: C.red, fontWeight: 800, fontSize: 14 }}>
+                    <Flame size={18} color={C.red} />
                     <span>Active Wildfire Hotspot</span>
                   </div>
 
-                  <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+                  <div style={{ background: C.redDim, border: `1px solid ${C.red}44`, borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-                      <span style={{ color: "#475569", fontWeight: 600 }}>Fire Radiative Power</span>
-                      <span style={{ fontFamily: "monospace", fontWeight: 800, color: "#DC2626" }}>{frp} MW</span>
+                      <span style={{ color: C.textDim, fontWeight: 600 }}>Fire Radiative Power</span>
+                      <span style={{ fontFamily: "monospace", fontWeight: 800, color: C.red }}>{frp} MW</span>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span style={{ color: "#475569", fontWeight: 600 }}>Satellite Source</span>
-                      <span style={{ fontWeight: 700, color: "#0F172A" }}>{h.satellite || "VIIRS/NOAA"}</span>
+                      <span style={{ color: C.textDim, fontWeight: 600 }}>Satellite Source</span>
+                      <span style={{ fontWeight: 700, color: C.text }}>{h.satellite || "VIIRS/NOAA"}</span>
                     </div>
                   </div>
 
-                  <div style={{ fontSize: 11, color: "#64748B", display: "flex", flexDirection: "column", gap: 3 }}>
+                  <div style={{ fontSize: 11, color: C.textFaint, display: "flex", flexDirection: "column", gap: 3 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                       <Satellite size={12} />
                       <span>Acquired: {h.acq_date || "Recent pass"}</span>
@@ -71,7 +72,7 @@ export default function WildfireHotspotOverlay({ hotspots = [] }) {
                     </div>
                   </div>
 
-                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #E2E8F0", display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#D97706", fontWeight: 700 }}>
+                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: C.amber, fontWeight: 700 }}>
                     <AlertTriangle size={13} />
                     <span>NASA FIRMS Satellite Detection</span>
                   </div>

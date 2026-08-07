@@ -7,6 +7,11 @@ const { C, S } = theme;
 
 export default function ShelterCard({ shelter, selected = false, onSelect, onDirections }) {
   const proximity = shelter.proximity || getProximityValidity(shelter.distMiles || parseFloat(shelter.dist) || 0);
+  const proxStyle = {
+    immediate: { color: C.teal, bg: C.tealDim, border: `${C.teal}55` },
+    moderate: { color: C.amber, bg: C.amberDim, border: `${C.amber}55` },
+    extended: { color: C.red, bg: C.redDim, border: `${C.red}55` },
+  }[proximity.level] || { color: C.teal, bg: C.tealDim, border: `${C.teal}55` };
 
   return (
     <article aria-labelledby={`s-${shelter.id}-title`} style={{ width: "100%" }}>
@@ -43,16 +48,16 @@ export default function ShelterCard({ shelter, selected = false, onSelect, onDir
                 <span style={{
                   fontSize: 11,
                   fontWeight: 700,
-                  color: proximity.color,
-                  background: proximity.bg,
-                  border: `1px solid ${proximity.border}`,
+                  color: proxStyle.color,
+                  background: proxStyle.bg,
+                  border: `1px solid ${proxStyle.border}`,
                   padding: "2px 8px",
                   borderRadius: 6,
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 4,
                 }}>
-                  <ShieldCheck size={12} color={proximity.color} />
+                  <ShieldCheck size={12} color={proxStyle.color} />
                   {proximity.badgeText}
                 </span>
               </div>
@@ -60,9 +65,9 @@ export default function ShelterCard({ shelter, selected = false, onSelect, onDir
 
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
               <div style={{
-                background: shelter.status === "Limited Space" ? "#FEF2F2" : C.tealDim,
-                color: shelter.status === "Limited Space" ? "#DC2626" : C.teal,
-                border: `1px solid ${shelter.status === "Limited Space" ? "#FCA5A5" : "transparent"}`,
+                background: shelter.status === "Limited Space" ? C.redDim : C.tealDim,
+                color: shelter.status === "Limited Space" ? C.red : C.teal,
+                border: `1px solid ${shelter.status === "Limited Space" ? `${C.red}55` : "transparent"}`,
                 padding: "5px 10px", borderRadius: 6,
                 fontWeight: 700, fontSize: 11,
                 fontFamily: "'JetBrains Mono', 'Roboto Mono', monospace",
@@ -76,7 +81,7 @@ export default function ShelterCard({ shelter, selected = false, onSelect, onDir
               {shelter.total != null ? `Capacity ${shelter.cap}` : "Capacity unknown"}
             </span>
             {shelter.isRealOSM && (
-              <span style={{ fontSize: 10, color: "#2563EB", background: "#EFF6FF", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>
+              <span style={{ fontSize: 10, color: C.blue, background: C.blueDim, padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>
                 OSM
               </span>
             )}

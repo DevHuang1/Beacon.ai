@@ -3,6 +3,7 @@ import { Marker, Popup } from "react-leaflet";
 import { Navigation } from "lucide-react";
 import WildfireHotspotOverlay from "../components/WildfireHotspotOverlay";
 import WeatherAlertMapOverlay from "../components/WeatherAlertMapOverlayWrapper";
+import { C } from "../lib/theme";
 import { useLocation } from "../lib/LocationContext";
 
 function createShelterIcon(shelter, isSelected) {
@@ -165,10 +166,10 @@ export default function EscapeMapContentInner({
         >
           <Popup>
             <div style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", padding: 2 }}>
-              <div style={{ fontWeight: 800, fontSize: 13, color: "#2563EB", marginBottom: 2 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, color: C.blue, marginBottom: 2 }}>
                 📍 Your Current GPS Location
               </div>
-              <div style={{ fontSize: 11, color: "#64748B", fontFamily: "monospace" }}>
+              <div style={{ fontSize: 11, color: C.textFaint, fontFamily: "monospace" }}>
                 {userLocation.lat.toFixed(4)}, {userLocation.lon.toFixed(4)}
               </div>
             </div>
@@ -183,9 +184,9 @@ export default function EscapeMapContentInner({
         const total = hasCapacity ? (s.total || parseInt(s.cap?.split("/")[1]) || 0) : null;
         const pct = total > 0 ? Math.min(100, Math.round((occupied / total) * 100)) : null;
 
-        let barColor = "#0D9488";
-        if (pct >= 90) barColor = "#DC2626";
-        else if (pct >= 75) barColor = "#D97706";
+        let barColor = C.teal;
+        if (pct >= 90) barColor = C.red;
+        else if (pct >= 75) barColor = C.amber;
 
         return (
           <Marker
@@ -208,7 +209,7 @@ export default function EscapeMapContentInner({
               <div style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", width: 250, padding: "2px 0" }}>
                 {/* Header Title & Status */}
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
-                  <div style={{ fontWeight: 800, fontSize: 15, color: "#0F172A", lineHeight: 1.2 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: C.text, lineHeight: 1.2 }}>
                     {s.name}
                   </div>
                   <span style={{
@@ -217,9 +218,9 @@ export default function EscapeMapContentInner({
                     fontFamily: "monospace",
                     padding: "2px 7px",
                     borderRadius: 6,
-                    background: s.status === "Limited Space" ? "#FEF2F2" : "#F0FDF4",
-                    color: s.status === "Limited Space" ? "#DC2626" : "#0D9488",
-                    border: `1px solid ${s.status === "Limited Space" ? "#FECACA" : "#99F6E4"}`,
+                    background: s.status === "Limited Space" ? C.redDim : C.tealDim,
+                    color: s.status === "Limited Space" ? C.red : C.teal,
+                    border: `1px solid ${s.status === "Limited Space" ? C.red + "44" : C.teal + "55"}`,
                     textTransform: "uppercase",
                     flexShrink: 0,
                   }}>
@@ -228,34 +229,34 @@ export default function EscapeMapContentInner({
                 </div>
 
                 {/* Distance & Address */}
-                <div style={{ fontSize: 12, color: "#475569", marginBottom: 10, display: "flex", flexDirection: "column", gap: 3 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 5, fontWeight: 700, color: "#2563EB" }}>
+                <div style={{ fontSize: 12, color: C.textDim, marginBottom: 10, display: "flex", flexDirection: "column", gap: 3 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, fontWeight: 700, color: C.blue }}>
                     <span>📍 Distance:</span>
                     <span style={{ fontFamily: "monospace" }}>{s.dist || "1.2 mi"}</span>
                   </div>
                   {s.address && (
-                    <div style={{ fontSize: 11, color: "#64748B" }}>
+                    <div style={{ fontSize: 11, color: C.textFaint }}>
                       {s.address}
                     </div>
                   )}
                 </div>
 
                 {/* Capacity Progress Bar */}
-                <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+                <div style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
                   {pct !== null ? (
                     <>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 700, color: C.textDim, marginBottom: 4 }}>
                         <span>Occupancy</span>
                         <span style={{ fontFamily: "monospace", color: barColor }}>
                           {occupied} / {total} ({pct}%)
                         </span>
                       </div>
-                      <div style={{ width: "100%", height: 6, background: "#E2E8F0", borderRadius: 99, overflow: "hidden" }}>
+                      <div style={{ width: "100%", height: 6, background: C.line, borderRadius: 99, overflow: "hidden" }}>
                         <div style={{ width: `${pct}%`, height: "100%", background: barColor, borderRadius: 99, transition: "width 0.3s ease" }} />
                       </div>
                     </>
                   ) : (
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "#64748B", textAlign: "center" }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: C.textFaint, textAlign: "center" }}>
                       Capacity data unavailable
                     </div>
                   )}
@@ -268,11 +269,11 @@ export default function EscapeMapContentInner({
                       <span key={f} style={{
                         fontSize: 10,
                         fontWeight: 600,
-                        background: "#EFF6FF",
-                        color: "#1D4ED8",
+                        background: C.blueDim,
+                        color: C.blue,
                         padding: "2px 7px",
                         borderRadius: 6,
-                        border: "1px solid #DBEAFE",
+                        border: `1px solid ${C.blue}33`,
                       }}>
                         {f}
                       </span>
@@ -292,7 +293,7 @@ export default function EscapeMapContentInner({
                       justifyContent: "center",
                       gap: 6,
                       padding: "8px 10px",
-                      background: "#2563EB",
+                      background: C.blue,
                       color: "#FFFFFF",
                       border: "none",
                       borderRadius: 8,
@@ -312,9 +313,9 @@ export default function EscapeMapContentInner({
                         alignItems: "center",
                         justifyContent: "center",
                         padding: "8px 12px",
-                        background: "#F1F5F9",
-                        color: "#0F172A",
-                        border: "1px solid #CBD5E1",
+                        background: C.panel2,
+                        color: C.text,
+                        border: `1px solid ${C.line}`,
                         borderRadius: 8,
                         fontSize: 12,
                         fontWeight: 700,

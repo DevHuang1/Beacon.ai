@@ -1,10 +1,11 @@
 import React from "react";
 import { Marker, Popup } from "react-leaflet";
+import { C } from "../lib/theme";
 
 function createMemberIcon(isSelected) {
   if (typeof window === "undefined") return null;
   const L = require("leaflet");
-  const color = isSelected ? "#2563EB" : "#0D9488";
+  const color = isSelected ? C.blue : C.teal;
   const html = `
     <div style="
       width: 26px;
@@ -34,8 +35,8 @@ export default function FamilyMapMarkers({ members = [], selectedId = null, onSe
         >
           <Popup>
             <div style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", minWidth: 180, padding: "2px 0" }}>
-              <div style={{ fontWeight: 800, fontSize: 14, color: "#0F172A", marginBottom: 4 }}>{member.name}</div>
-              <div style={{ fontSize: 12, color: "#475569", fontFamily: "monospace" }}>
+              <div style={{ fontWeight: 800, fontSize: 14, color: C.text, marginBottom: 4 }}>{member.name}</div>
+              <div style={{ fontSize: 12, color: C.textDim, fontFamily: "monospace" }}>
                 {position[0].toFixed(5)}, {position[1].toFixed(5)}
               </div>
             </div>

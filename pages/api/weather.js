@@ -2,6 +2,22 @@ import { fetchWithTimeout } from "../../lib/api-utils";
 
 const NWS_BASE = "https://api.weather.gov";
 
+async function reverseGeocode(lat, lon) {
+  try {
+    const res = await fetchWithTimeout(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=en&zoom=10`,
+      { headers: { "User-Agent": "BeaconAI-EmergencyApp/1.0" } },
+      4000
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const a = data.address || {};
+      return a.city || a.town || a.village || a.municipality || a.county || data.name || "Current GPS Coordinates";
+    }
+  } catch (e) {}
+  return "Current GPS Coordinates";
+}
+
 export default async function handler(req, res) {
   const { type, lat = 40.8, lon = -124.16 } = req.query;
 
@@ -158,11 +174,12 @@ export default async function handler(req, res) {
         }));
 
         const rain12h = (omData.hourly?.precipitation_probability || []).slice(0, 12).map(p => p / 20);
+        const fallbackName = await reverseGeocode(lat, lon);
 
         return res.status(200).json({
           success: true,
           data: {
-            location: { lat: Number(lat), lon: Number(lon), name: "Current GPS Coordinates" },
+            location: { lat: Number(lat), lon: Number(lon), name: fallbackName },
             current: currentData,
             forecast: days,
             rain_12h: rain12h,
