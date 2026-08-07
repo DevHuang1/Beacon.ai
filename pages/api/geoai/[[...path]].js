@@ -33,6 +33,7 @@ export default async function handler(req, res) {
         status: "degraded",
         pythonService: false,
         error: `${diagnosed}${err.message || "failed to reach backend"}`,
+        geoaiUrl: PYTHON_SERVICE,
         modules: { water: false, segment: false, classify: false, detect: false, change: false },
         libs: { numpy: false, pil: false, samgeo: false, torchgeo: false },
       });
