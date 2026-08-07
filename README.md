@@ -58,7 +58,7 @@ A real-time disaster preparedness and evacuation app built with Next.js, Leaflet
 | NWS alerts | ⚠️ [NWS API](https://api.weather.gov/alerts) | Live | No |
 | Map tiles | 🗺️ [OpenStreetMap](https://www.openstreetmap.org/) | Live | No |
 | Emergency email | ✉️ [Resend](https://resend.com/) | Live | Yes (free) |
-| Shelters | 🏠 Hardcoded demo (Eureka, CA) | Mock | No |
+| Shelters | 🏠 [OpenStreetMap / Overpass](https://wiki.openstreetmap.org/wiki/Overpass_API) | Live | No |
 
 ## Quick start
 

@@ -31,18 +31,14 @@ Required: fastapi, uvicorn, Pillow, numpy
 Optional (for real AI): segment-geospatial, torchgeo, rasterio, geopandas
 
 
-3. SHELTERS (optional — replace demo data)
--------------------------------------------
-pages/api/shelters.js returns 5 hardcoded shelters in Eureka, CA.
-Replace with a real source like:
-- Red Cross shelter API
-- A database / CMS
-- Google Sheets / Airtable
-- Any evac shelter feed from your local emergency services
+3. SHELTERS
+------------
+pages/api/shelters.js fetches real emergency shelters from OpenStreetMap
+(Overpass API) around the user's location. No key or mock data needed.
 
 
 4. RUN THE APP
---------------
+-------------
 npm install
 npm run dev
 Open http://localhost:3000
@@ -55,6 +51,6 @@ Open http://localhost:3000
 - Earthquake: lists recent USGS events, toggle "Damage" for satellite change detection
 - Flood: shows USGS river gauges, toggle "Satellite" for flood extent overlay
 - Wildfire: shows FIRMS hotspots, toggle "Burn scar" for segmentation overlay
-- Shelters: works with demo data
+- Shelters: works with real OpenStreetMap data
 - Routes: works if shelters are loaded
 
