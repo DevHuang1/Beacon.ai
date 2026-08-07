@@ -309,7 +309,7 @@ export default function FloodMonitoring() {
               )}
               {satLoading
                 ? "Fetching satellite imagery & running water detection..."
-                : `Satellite flood detection failed: ${satError}`}
+                : `Satellite flood detection failed — ${satError}`}
             </div>
           )}
         </MapFrame>

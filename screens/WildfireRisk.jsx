@@ -111,7 +111,7 @@ export default function WildfireRisk() {
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.amber, flexShrink: 0 }} />
           {scarLoading
             ? "Requesting burn scar segmentation..."
-            : `Burn scar segmentation requires a satellite image — GeoAI service returned: ${scarError}`}
+            : `Burn scar segmentation failed — ${scarError}`}
         </div>
       )}
 

@@ -21,12 +21,18 @@ export default async function handler(req, res) {
     });
 
     const data = await response.json();
-    return res.status(response.status).json(data);
+    return res.status(response.status).json({ ...data, geoai: { reachable: true, url: PYTHON_SERVICE } });
   } catch (err) {
+    const diagnosed =
+      PYTHON_SERVICE === "http://127.0.0.1:8001"
+        ? "[GeoAI backend NOT deployed or GEOAI_SERVICE_URL not set] "
+        : "[GeoAI service unreachable] ";
+
     if (targetPath === "health") {
       return res.status(200).json({
         status: "degraded",
         pythonService: false,
+        error: `${diagnosed}${err.message || "failed to reach backend"}`,
         modules: { water: false, segment: false, classify: false, detect: false, change: false },
         libs: { numpy: false, pil: false, samgeo: false, torchgeo: false },
       });
@@ -34,7 +40,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: false,
-      error: "GeoAI service unavailable on :8001 — start it with: uvicorn main:app --port 8001",
+      error: `${diagnosed}GeoAI feature unavailable (${err.message || "no response"}). Set GEOAI_SERVICE_URL and deploy the Python service to enable it.`,
       source: "geoai_unavailable",
     });
   } finally {
