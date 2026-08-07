@@ -448,7 +448,7 @@ export function SideNav({ active, onNavigate, collapsed, mobile = false, onClose
       flexDirection: "column",
       padding: "16px 10px",
       gap: 6,
-      transition: "width 0.2s ease",
+      transition: "width 0.2s ease, background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease",
       boxShadow: S.sm,
     }}>
       {content}

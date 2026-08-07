@@ -29,9 +29,8 @@ function saveLocation(lat, lon, label) {
 }
 
 export function LocationProvider({ children }) {
-  const initial = loadLocation();
-  const [location, setLocationState] = useState(initial || { lat: 40.802, lon: -124.163, label: "40.8020°N, 124.1630°W", isDefault: true });
-  const [gpsStatus, setGpsStatus] = useState(initial ? "saved" : "default");
+  const [location, setLocationState] = useState({ lat: 40.802, lon: -124.163, label: "40.8020°N, 124.1630°W", isDefault: true });
+  const [gpsStatus, setGpsStatus] = useState("default");
 
   const updateLocation = useCallback((lat, lon, label) => {
     setLocationState({ lat, lon, label: label || `${lat.toFixed(4)}, ${lon.toFixed(4)}`, isDefault: false });
@@ -64,13 +63,18 @@ export function LocationProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    // Only auto-acquire live GPS on first launch when the user has no saved
-    // location. If a location was saved (Profile > Settings), keep it across
-    // refreshes instead of overwriting it with device GPS.
-    if (!initial) {
+    // Load the saved location after mount (not during render) so the SSR
+    // markup and the first client render match — reading localStorage during
+    // render would cause React hydration mismatches. If no location was
+    // saved (Profile > Settings), auto-acquire live GPS on first launch.
+    const saved = loadLocation();
+    if (saved) {
+      setLocationState({ ...saved, isDefault: false });
+      setGpsStatus("saved");
+    } else {
       refreshGps();
     }
-  }, [initial, refreshGps]);
+  }, [refreshGps]);
 
   const latDir = location.lat >= 0 ? "N" : "S";
   const lonDir = location.lon >= 0 ? "E" : "W";

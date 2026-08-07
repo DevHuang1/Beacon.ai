@@ -1,23 +1,55 @@
 import React from "react";
-import { C, S, fontBody, fontDisplay, fontMono } from "../lib/theme";
+import { themes, shadows, fontBody, fontDisplay, fontMono } from "../lib/theme";
+
+const L = themes.light;
+const D = themes.dark;
+const Ls = shadows.light;
+const Ds = shadows.dark;
 
 const css = `
 :root {
-  --bg: ${C.bg};
-  --panel: ${C.panel};
-  --panel2: ${C.panel2};
-  --panel3: ${C.panel3};
-  --line: ${C.line};
-  --line-soft: ${C.lineSoft};
-  --text: ${C.text};
-  --text-dim: ${C.textDim};
-  --text-faint: ${C.textFaint};
-  --red: ${C.red};
-  --amber: ${C.amber};
-  --teal: ${C.teal};
-  --blue: ${C.blue};
-  --focus: ${C.blue};
+  --bg: ${L.bg};
+  --panel: ${L.panel};
+  --panel2: ${L.panel2};
+  --panel3: ${L.panel3};
+  --line: ${L.line};
+  --line-soft: ${L.lineSoft};
+  --text: ${L.text};
+  --text-dim: ${L.textDim};
+  --text-faint: ${L.textFaint};
+  --red: ${L.red};
+  --amber: ${L.amber};
+  --teal: ${L.teal};
+  --blue: ${L.blue};
+  --purple: ${L.purple};
+  --focus: ${L.blue};
+  --selection-bg: ${L.blue}44;
+  --shadow-sm: ${Ls.sm};
+  --shadow-md: ${Ls.md};
+  --shadow-lg: ${Ls.lg};
   --base-size: 15px;
+}
+
+html[data-theme="dark"] {
+  --bg: ${D.bg};
+  --panel: ${D.panel};
+  --panel2: ${D.panel2};
+  --panel3: ${D.panel3};
+  --line: ${D.line};
+  --line-soft: ${D.lineSoft};
+  --text: ${D.text};
+  --text-dim: ${D.textDim};
+  --text-faint: ${D.textFaint};
+  --red: ${D.red};
+  --amber: ${D.amber};
+  --teal: ${D.teal};
+  --blue: ${D.blue};
+  --purple: ${D.purple};
+  --focus: ${D.blue};
+  --selection-bg: ${D.blue}44;
+  --shadow-sm: ${Ds.sm};
+  --shadow-md: ${Ds.md};
+  --shadow-lg: ${Ds.lg};
 }
 
 * { box-sizing: border-box; }
@@ -38,14 +70,22 @@ body {
   line-height: 1.5;
   letter-spacing: 0.008em;
   overflow-x: hidden;
+  transition: background 0.3s ease, color 0.3s ease;
 }
 #__next { height: 100%; }
+
+/* Theme colors crossfade with one shared duration so a light/dark toggle
+   feels smooth and consistent — every surface swaps in sync. */
+* {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease,
+    stroke 0.3s ease, fill 0.3s ease;
+}
 
 img, svg, canvas { max-width: 100%; }
 
 .grid, main > * { min-width: 0; }
 
-::selection { background: ${C.blue}44; color: ${C.text}; }
+::selection { background: var(--selection-bg); color: var(--text); }
 
 h1, h2, h3, h4 {
   font-family: ${fontDisplay};
@@ -153,23 +193,27 @@ button { font-family: ${fontBody}; cursor: pointer; background: none; border: no
 .mono { font-family: ${fontMono}; }
 .meta { font-size: 13px; color: var(--text-dim); letter-spacing: 0.01em; }
 
+input, select, textarea { color: var(--text); }
+select option { background: var(--panel); color: var(--text); }
+
 .leaflet-control-zoom a {
   width: 40px !important; height: 40px !important;
   line-height: 40px !important; border-radius: 8px !important;
-  font-size: 18px !important; background: #FFFFFF !important;
-  color: #0F172A !important; border: 1px solid #E2E8F0 !important;
-  box-shadow: ${S.sm} !important;
+  font-size: 18px !important; background: var(--panel) !important;
+  color: var(--text) !important; border: 1px solid var(--line) !important;
+  box-shadow: var(--shadow-sm) !important;
 }
-.leaflet-control-zoom a:hover { background: #F8FAFC !important; color: #2563EB !important; }
+.leaflet-control-zoom a:hover { background: var(--panel2) !important; color: var(--blue) !important; }
 .leaflet-control-zoom { border: none !important; }
 .leaflet-control-attribution { display: none !important; }
 .leaflet-popup-content-wrapper {
-  background: #FFFFFF !important; color: #0F172A !important;
-  border: 1px solid #E2E8F0 !important; border-radius: 12px !important;
-  box-shadow: ${S.md} !important;
+  background: var(--panel) !important; color: var(--text) !important;
+  border: 1px solid var(--line) !important; border-radius: 12px !important;
+  box-shadow: var(--shadow-md) !important;
 }
-.leaflet-popup-tip { background: #FFFFFF !important; border: 1px solid #E2E8F0 !important; }
-.leaflet-popup-close-button { color: #64748B !important; }
+.leaflet-popup-tip { background: var(--panel) !important; border: 1px solid var(--line) !important; }
+.leaflet-popup-close-button { color: var(--text-faint) !important; }
+.leaflet-container { background: var(--bg) !important; }
 `;
 
 export function GlobalStyle() {

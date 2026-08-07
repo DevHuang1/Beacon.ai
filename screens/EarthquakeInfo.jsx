@@ -10,7 +10,7 @@ import { useIsMobile } from "../lib/useIsMobile";
 
 const QuakeMapMarkers = dynamic(() => import("./QuakeMapMarkers"), { ssr: false });
 
-const DAMAGE_COLORS = { new_construction: C.amber, deforestation: C.red, flooding: C.blue };
+const damageColor = (type) => ({ new_construction: C.amber, deforestation: C.red, flooding: C.blue }[type] || C.amber);
 
 export default function EarthquakeInfo() {
   const loc = useLocation();
@@ -43,25 +43,43 @@ export default function EarthquakeInfo() {
     if (!damageMode || tab !== "recent") { setDamageData(null); setDamageError(null); return; }
     setDamageLoading(true);
     setDamageError(null);
-    api.geoai.change({ before: {}, after: {} }).then((res) => {
-      if (res?.success) {
-        setDamageData(res.data);
-      } else {
+    (async () => {
+      try {
+        const beforeDate = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const [beforeRes, afterRes] = await Promise.all([
+          api.satellite(loc.lat, loc.lon, 20, beforeDate),
+          api.satellite(loc.lat, loc.lon, 20),
+        ]);
+        if (!beforeRes?.success || !beforeRes.data?.base64 || !afterRes?.success || !afterRes.data?.base64) {
+          setDamageData(null);
+          setDamageError("Satellite imagery unavailable for this region/time");
+          return;
+        }
+        const res = await api.geoai.change({
+          before: { base64: beforeRes.data.base64 },
+          after: { base64: afterRes.data.base64 },
+        });
+        if (res?.success && res.data) {
+          setDamageData(res.data);
+        } else {
+          setDamageData(null);
+          setDamageError(res?.error || "Damage assessment failed");
+        }
+      } catch (err) {
         setDamageData(null);
-        setDamageError(res?.error || "Damage assessment failed");
+        setDamageError(err.message || "Damage assessment failed");
+      } finally {
+        setDamageLoading(false);
       }
-    }).catch((err) => {
-      setDamageData(null);
-      setDamageError(err.message || "Damage assessment failed");
-    }).finally(() => setDamageLoading(false));
-  }, [damageMode, tab]);
+    })();
+  }, [damageMode, tab, loc.lat, loc.lon]);
 
   const filtered = quakes.filter((e) => e.mag >= minMag);
   const levelColor = { major: C.red, moderate: C.amber, light: C.blue };
   const levelBg = { major: C.redGlow, moderate: C.amberGlow, light: C.blueGlow };
 
   const damageGeo = damageMode && damageData?.type === "FeatureCollection" ? damageData : null;
-  const damageStyle = (f) => ({ color: DAMAGE_COLORS[f.properties.type] || C.amber, weight: 2, fillColor: DAMAGE_COLORS[f.properties.type] || C.amber, fillOpacity: 0.15 });
+  const damageStyle = (f) => ({ color: damageColor(f.properties.type), weight: 2, fillColor: damageColor(f.properties.type), fillOpacity: 0.15 });
 
   return (
     <div style={{ animation: "fadeIn 0.3s ease" }}>

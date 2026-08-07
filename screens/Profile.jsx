@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { PageHeader, Panel, Button } from "../components";
+import { PageHeader, Panel, Button, Toggle } from "../components";
 import {
   Settings, MapPin, Plus, Trash2, Save, UserPlus, Phone, User,
   LocateFixed, Target, CheckCircle2, AlertCircle, Users,
-  Search, Globe, Share2, Bell, Copy, ExternalLink, Compass,
+  Search, Globe, Share2, Bell, Copy, ExternalLink, Compass, Moon, Sun,
 } from "lucide-react";
 import { C, S, fontDisplay, fontMono } from "../lib/theme";
+import { useTheme } from "../lib/ThemeContext";
 import { useLocation } from "../lib/LocationContext";
 import { useAuth } from "../components/AuthProvider";
 import { sendEmergencyAlert } from "../lib/emergencyAlerts";
@@ -40,11 +41,17 @@ const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 export default function Profile() {
   const loc = useLocation();
   const { user } = useAuth();
+  const { mode, toggle } = useTheme();
 
-  const [family, setFamilyState] = useState(() => loadJSON(STORAGE_KEYS.family, []));
-  const [prefs, setPrefsState] = useState(() => loadJSON(STORAGE_KEYS.prefs, { defaultRadius: 10 }));
+  const [family, setFamilyState] = useState([]);
+  const [prefs, setPrefsState] = useState({ defaultRadius: 10 });
   const setPrefs = setPrefsState;
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setFamilyState(loadJSON(STORAGE_KEYS.family, []));
+    setPrefsState(loadJSON(STORAGE_KEYS.prefs, { defaultRadius: 10 }));
+  }, []);
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -490,6 +497,20 @@ export default function Profile() {
                 <option value={25}>25 miles</option>
                 <option value={50}>50 miles</option>
               </select>
+            </div>
+
+            {/* Appearance */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderTop: `1px solid ${C.lineSoft}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: mode === "dark" ? C.blueGlow : C.amberDim, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  {mode === "dark" ? <Moon size={16} color={C.blue} /> : <Sun size={16} color={C.amber} />}
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, color: C.text, fontWeight: 600 }}>Dark mode</div>
+                  <div style={{ fontSize: 12, color: C.textFaint, marginTop: 2 }}>Low-light appearance for night use</div>
+                </div>
+              </div>
+              <Toggle checked={mode === "dark"} onChange={toggle} />
             </div>
           </div>
         </Panel>

@@ -4,6 +4,7 @@ import { SWRConfig } from "swr";
 import { GlobalStyle } from "../components";
 import { AuthProvider, useAuth } from "../components/AuthProvider";
 import { LocationProvider } from "../lib/LocationContext";
+import { ThemeProvider } from "../lib/ThemeContext";
 import { swrConfig } from "../lib/swr";
 
 function AuthGuard({ children }) {
@@ -23,9 +24,9 @@ function AuthGuard({ children }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "#F4F7FB",
+        background: "var(--bg)",
         fontFamily: "monospace",
-        color: "#64748B",
+        color: "var(--text-faint)",
         fontSize: 14,
       }}>
         Loading...
@@ -38,15 +39,17 @@ function AuthGuard({ children }) {
 
 export default function App({ Component, pageProps }) {
   return (
-    <AuthProvider>
-      <GlobalStyle />
-      <LocationProvider>
-        <AuthGuard>
-          <SWRConfig value={swrConfig}>
-            <Component {...pageProps} />
-          </SWRConfig>
-        </AuthGuard>
-      </LocationProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <GlobalStyle />
+        <LocationProvider>
+          <AuthGuard>
+            <SWRConfig value={swrConfig}>
+              <Component {...pageProps} />
+            </SWRConfig>
+          </AuthGuard>
+        </LocationProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

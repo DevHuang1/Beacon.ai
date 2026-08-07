@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import { createClient } from "../lib/supabase-client";
 import { GlobalStyle } from "../components";
@@ -48,7 +48,11 @@ export default function AuthPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [quickAccount, setQuickAccount] = useState(null);
-  const [quickAccounts] = useState(() => loadQuickAccounts());
+  const [quickAccounts, setQuickAccounts] = useState(QUICK_ACCOUNTS);
+
+  useEffect(() => {
+    setQuickAccounts(loadQuickAccounts());
+  }, []);
 
   const signIn = async (em, pw) => {
     setError("");

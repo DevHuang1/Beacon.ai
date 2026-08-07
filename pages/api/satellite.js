@@ -30,7 +30,7 @@ async function getImage(url) {
 }
 
 export default async function handler(req, res) {
-  const { lat, lon, radiusKm, size = 256 } = req.query;
+  const { lat, lon, radiusKm, size = 256, date } = req.query;
 
   try {
     const centerLat = parseFloat(lat);
@@ -48,7 +48,7 @@ export default async function handler(req, res) {
     const maxLon = (rLon + degLon).toFixed(5);
 
     const bbox = `${minLon},${minLat},${maxLon},${maxLat}`;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = date || new Date().toISOString().slice(0, 10);
     const url =
       `${GIBS_WMS}?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap` +
       `&FORMAT=image/png&TRANSPARENT=true&LAYERS=${LAYER}` +

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Marker, Popup, Circle, useMap } from "react-leaflet";
 import L from "leaflet";
-import { C, fontMono } from "../lib/theme";
+import { C, S, fontMono } from "../lib/theme";
 
 function icon(html, w = 36, h = 36, anchorX = 18, anchorY = 18) {
   return L.divIcon({
@@ -82,12 +82,12 @@ export default function EscapeMapOverlay({
           <Marker position={[userCoords.lat, userCoords.lon]} icon={USER_ICON}>
             <Popup>
               <div style={{ minWidth: 180, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                <div style={{ fontWeight: 800, fontSize: 14, color: "#0F172A", marginBottom: 4 }}>Your Location</div>
-                <div style={{ fontSize: 12, color: "#475569", fontFamily: fontMono }}>
+                <div style={{ fontWeight: 800, fontSize: 14, color: C.text, marginBottom: 4 }}>Your Location</div>
+                <div style={{ fontSize: 12, color: C.textDim, fontFamily: fontMono }}>
                   {userCoords.lat.toFixed(5)}, {userCoords.lon.toFixed(5)}
                 </div>
                 {userCoords.accuracy && (
-                  <div style={{ fontSize: 11, color: "#64748B", marginTop: 4 }}>
+                  <div style={{ fontSize: 11, color: C.textFaint, marginTop: 4 }}>
                     Accuracy: ±{Math.round(userCoords.accuracy)}m
                   </div>
                 )}
@@ -170,14 +170,14 @@ export default function EscapeMapOverlay({
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                     <span style={{ fontSize: 24 }}>{h.type === "fire" ? "🔥" : h.type === "flood" ? "🌊" : h.type === "quake" || h.type === "earthquake" ? "🌍" : "⚠️"}</span>
                     <div>
-                      <div style={{ fontWeight: 800, fontSize: 15, color: "#0F172A" }}>{displayType}</div>
+                      <div style={{ fontWeight: 800, fontSize: 15, color: C.text }}>{displayType}</div>
                       <span style={{
                         fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 4,
                         background: `${sevCfg.color}18`, color: sevCfg.color,
                       }}>{sevCfg.label} Severity</span>
                     </div>
                   </div>
-                  <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.6 }}>
+                  <div style={{ fontSize: 13, color: C.textDim, lineHeight: 1.6 }}>
                     <div><strong>Time detected:</strong> {formatTime()}</div>
                     <div><strong>AI confidence:</strong> {confidence}</div>
                     <div><strong>Coordinates:</strong> {lat.toFixed(4)}, {lon.toFixed(4)}</div>
@@ -206,7 +206,7 @@ export default function EscapeMapOverlay({
             <Popup>
               <div style={{ minWidth: 240, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                 <div style={{
-                  fontWeight: 800, fontSize: 15, color: isRec ? C.teal : "#0F172A",
+                  fontWeight: 800, fontSize: 15, color: isRec ? C.teal : C.text,
                   display: "flex", alignItems: "center", gap: 6, marginBottom: 4,
                 }}>
                   🏠 {s.name}
@@ -217,11 +217,11 @@ export default function EscapeMapOverlay({
                     }}>RECOMMENDED</span>
                   )}
                 </div>
-                {s.address && <div style={{ fontSize: 12, color: "#64748B", marginBottom: 6 }}>{s.address}</div>}
-                <div style={{ fontSize: 13, fontWeight: 700, color: isRec ? C.teal : "#475569", marginBottom: 6 }}>
+                {s.address && <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 6 }}>{s.address}</div>}
+                <div style={{ fontSize: 13, fontWeight: 700, color: isRec ? C.teal : C.textDim, marginBottom: 6 }}>
                   📍 {s.dist} from your location
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px 12px", fontSize: 12, color: "#475569" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px 12px", fontSize: 12, color: C.textDim }}>
                   <div><strong>Capacity:</strong> {s.cap || s.total || "N/A"}</div>
                   <div><strong>Occupied:</strong> {s.occupied != null ? `${s.occupied}` : "Unknown"}</div>
                   <div><strong>Availability:</strong> {availability}</div>
@@ -248,13 +248,13 @@ export default function EscapeMapOverlay({
       {/* Map Legend */}
       <div style={{
         position: "absolute", bottom: 24, left: 12, zIndex: 1000,
-        background: "rgba(255,255,255,0.95)", backdropFilter: "blur(12px)",
-        border: "1px solid #E2E8F0", borderRadius: 12,
-        padding: "12px 16px", boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+        background: `${C.panel}E6`, backdropFilter: "blur(12px)",
+        border: `1px solid ${C.line}`, borderRadius: 12,
+        padding: "12px 16px", boxShadow: S.lg,
         minWidth: 140, fontFamily: "'Plus Jakarta Sans', sans-serif",
         pointerEvents: "auto",
       }}>
-        <div style={{ fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: "#64748B", marginBottom: 8, letterSpacing: "0.05em" }}>Map Legend</div>
+        <div style={{ fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: C.textFaint, marginBottom: 8, letterSpacing: "0.05em" }}>Map Legend</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           {[
             { emoji: "📍", label: "Your Location", color: "#3B82F6" },
@@ -266,7 +266,7 @@ export default function EscapeMapOverlay({
           ].map((item) => (
             <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 14, width: 20, textAlign: "center" }}>{item.emoji}</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "#475569" }}>{item.label}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: C.textDim }}>{item.label}</span>
             </div>
           ))}
         </div>

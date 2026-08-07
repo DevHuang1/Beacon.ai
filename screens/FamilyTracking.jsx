@@ -62,15 +62,17 @@ function fallbackOffsetFor(id) {
 export default function FamilyTracking() {
   const loc = useLocation();
   const isMobile = useIsMobile();
-  const [members, setMembers] = useState(() => {
-    const saved = loadJSON("beacon_profile_family", []);
-    return Array.isArray(saved) ? saved : [];
-  });
+  const [members, setMembers] = useState([]);
   const [locations, setLocations] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [actionMsg, setActionMsg] = useState("");
   const [sharing, setSharing] = useState(false);
   const [dbNote, setDbNote] = useState("");
+
+  useEffect(() => {
+    const saved = loadJSON("beacon_profile_family", []);
+    setMembers(Array.isArray(saved) ? saved : []);
+  }, []);
 
   const refreshLocations = useCallback(async () => {
     try {
